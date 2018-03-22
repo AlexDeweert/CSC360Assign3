@@ -99,27 +99,6 @@ int main( int argc, char** argv ) {
     memcpy( &fat_starts, address+fat_starts_offset, fat_starts_width );
     memcpy( &fat_blocks, address+fat_blocks_offset, fat_blocks_width );
 
-    //This is a line from xxd of test.img (appears in big endian order)
-    //0000000: 4353 4333 3630 4653 0200 0000 1900 0000  CSC360FS........
-    //position  0 1  2 3  4 5  6 7  8 9 1011 1213 1415
-    //Calling offset +10 results in 1900 0000
-    //                              1213 1011
-    //Notice here that the blocksize is supposed to start position 10; 0x00001900
-    //so we would have offset +10, 4 bytes wide, so 10,11,12,13. However...
-    
-    //Notice the hexdump on a little endian machine
-    //0000000: 5343 3343 3036 5346 0002 0000 0019 0000  CSC360FS........
-    //          0 1  2 3  4 5  7 6  8 9 1011 1213
-    //The relevant bytes include 12, 13, 10, 11 (read in reverse order)
-    //Calling offset +12 results in 0x00001900
-    //                                10111213
-
-    //It appears that on little endian, the byte ordering is reversed of course
-    //But I'm required to call offset 12 to get 0x1900
-    //         The value needs to be in the order 0x 00 00 19 00 in either case
-    //So on Big Endian we have: (from left to right) 10 11 12 13
-    //On Little Endian we have: (from left to right) 11 10 13 12
-
     blocksize = htons(blocksize);
     blockcount = htons(blockcount);
     fat_starts = htons(fat_starts);
