@@ -1,15 +1,30 @@
-// Super block information: (0 indexed)
 // Block size: 512  <- offset 8
 // Block count: 5120 <-- offset 12 
 // FAT starts: 1 <-- offset 16
 // FAT blocks: 40 <-- offset 20
-// Root directory start: 41 <-- offset 23
-// Root directory blocks: 8 <-- offset 27
+// Root directory start: 41 <-- offset 24
+// Root directory blocks: 8 <-- offset 28
 
 // FAT information:
 // Free Blocks: 5071
 // Reserved Blocks: 41
 // Allocated Blocks: 8
+
+/*
+Block Size: 512
+Block Count: 6400
+FAT starts: 2
+FAT blocks: 50
+Root directory start: 53
+Root directory blocks: 8
+*/
+
+/*
+FAT information:
+Free Blocks: 5071
+Reserved Blocks: 41
+Allocated Blocks: 8
+*/
 
 #include <stdio.h>
 #include <sys/mman.h>
@@ -21,52 +36,33 @@
 #include <unistd.h>
 const int i = 1;
 #define is_bigendian() ( (*(char*)&i) == 0 )
+#define DEBUG 0
 
 //Prototypes
-void printFileSystemIdentifier( unsigned char buf[] );
+short getBlocksize( void* );
+long getBlockcount( void* );
+long getFATstarts( void* );
+long getFATblocks( void* );
+long getRootDirStarts( void* ); 
+long getRootDirBlocks( void* );
+void getFreeBlocks( void* );
+
+//Globals
+//These are FAT variables
+//These could be moved into non-globals
+int free_blocks=0;
+int res_blocks=0;
+int alloc_blocks=0;
+int eof_blocks=0;
 
 int main( int argc, char** argv ) {
     //FILE *fp;
     //fp = fopen("test.img", "rb" );
-    printf("arg1: %s\n", argv[1]);
     int fp = open( argv[1], O_RDWR );
-
-    // struct stat {
-    //            dev_t     st_dev;     /* ID of device containing file */
-    //            ino_t     st_ino;     /* inode number */
-    //            mode_t    st_mode;    /* protection */
-    //            nlink_t   st_nlink;   /* number of hard links */
-    //            uid_t     st_uid;     /* user ID of owner */
-    //            gid_t     st_gid;     /* group ID of owner */
-    //            dev_t     st_rdev;    /* device ID (if special file) */
-    //            off_t     st_size;    /* total size, in bytes */
-    //            blksize_t st_blksize; /* blocksize for filesystem I/O */
-    //            blkcnt_t  st_blocks;  /* number of 512B blocks allocated */
-    //            time_t    st_atime;   /* time of last access */
-    //            time_t    st_mtime;   /* time of last modification */
-    //            time_t    st_ctime;   /* time of last status change */
-    //        };
     struct stat buffer;
-
-    //On success, fstat returns 0, otherwise -1 returned
-    //errnos: 
-       // EACCES Search permission is denied for one of the directories in the path prefix of path.  (See also path_resolution(7).)
-       // EBADF  fd is bad.
-       // EFAULT Bad address.
-       // ELOOP  Too many symbolic links encountered while traversing the path.
-       // ENAMETOOLONG
-       // path is too long.
-       // ENOENT A component of path does not exist, or path is an empty string.
-       // ENOMEM Out of memory (i.e., kernel memory).
-       // ENOTDIR
-       // A component of the path prefix of path is not a directory.
-       // EOVERFLOWd refers 
-       // path or fd refers to a file whose size, inode number, or number of blocks cannot be represented in, respectively, the types
-       // off_t,  ino_t,  or  blkcnt_t.  This error can occur when, for example, an application compiled on a 32-bit platform without
-       // -D_FILE_OFFSET_BITS=64 calls stat() on a file whose size exceeds (1<<31)-1 bytes.
     int status = fstat(fp, &buffer);
-    printf("Status of buffer: %d\n", status);
-    printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
+    if( DEBUG ) printf("Status of buffer: %d\n", status);
+    if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
 
     // NULL indicates the OS can decide where in memory to map the file.
     // buffer.st_size: the length of the mapping
@@ -79,39 +75,122 @@ int main( int argc, char** argv ) {
                 perror("Map source error\n");
                 exit(1);
     }
+   
+    printf("Super block information:\n");
+    printf("Block size: %hu\n", getBlocksize(address) );
+    if( DEBUG ) printf("Block Size HEX: 0x%08x\n", getBlocksize(address) );
+    printf("Block count: %ld\n", getBlockcount(address) );
+    if( DEBUG ) printf("Block Count HEX: 0x%08lx\n", getBlockcount(address) );
+    printf("FAT starts: %ld\n", getFATstarts(address) );
+    if( DEBUG ) printf("FAT starts HEX: 0x%08lx\n", getFATstarts(address) );
+    printf("FAT blocks: %ld\n", getFATblocks(address) );
+    if( DEBUG ) printf("FAT blocks HEX: 0x%08lx\n", getFATblocks(address) );
+    printf("Root directory start: %ld\n", getRootDirStarts(address) );
+    if( DEBUG ) printf("Root directory start HEX: 0x%08lx\n", getRootDirStarts(address) );
+    printf("Root directory blocks: %ld\n", getRootDirBlocks(address) );
+    if( DEBUG ) printf("Root directory blocks HEX: 0x%08lx\n", getRootDirBlocks(address) );
+    printf("\nFAT Information:\n");
+    getFreeBlocks(address);
 
-    int blocksize=0;
-    int blockcount=0;
-    int fat_starts=0;
-    int fat_blocks=0;
-
-    size_t blocksize_offset = 8;
-    size_t blocksize_width = 2;
-    size_t blockcount_offset = 12;
-    size_t blockcount_width = 4;
-    size_t fat_starts_offset = 16;
-    size_t fat_starts_width = 4;
-    size_t fat_blocks_offset = 20;
-    size_t fat_blocks_width = 4;
-
-    memcpy( &blocksize, address+blocksize_offset, blocksize_width );
-    memcpy( &blockcount, address+blockcount_offset, blockcount_width );
-    memcpy( &fat_starts, address+fat_starts_offset, fat_starts_width );
-    memcpy( &fat_blocks, address+fat_blocks_offset, fat_blocks_width );
-
-    blocksize = htons(blocksize);
-    blockcount = htons(blockcount);
-    fat_starts = htons(fat_starts);
-    fat_blocks = htons(fat_blocks);
-
-    printf("Block Size: %d\n", blocksize );
-    printf("Block Size HEX: 0x%08x\n", blocksize );
-    printf("Block Count: %d\n", blockcount );
-    printf("Block Count HEX: 0x%08x\n", blockcount );
-    printf("FAT starts: %d\n", fat_starts );
-    printf("FAT starts HEX: 0x%08x\n", fat_starts );
-    printf("FAT blocks: %d\n", fat_blocks );
-    printf("FAT blocks HEX: 0x%08x\n", fat_blocks );
+    printf("Free Blocks: %d\n", free_blocks);
+    printf("Reserved Blocks: %d\n", res_blocks);
+    printf("Allocated Blocks: %d\n", alloc_blocks);
+    if( DEBUG) printf("EOF Blocks: %d\n", eof_blocks);
 
     close(fp);
+}
+
+void getFreeBlocks( void* address ) {
+
+    /* Here we have transition from end of FAT to allocated files
+    byte 26624 is the last string of zeroes inthe last FAT row.
+    00067e0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+    00067f0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
+    0006800: 090a 0969 6620 2820 6172 6776 5b33 5d20  ...if ( argv[3]
+    */
+
+    //26624 0x6800 might be where some files are allocated
+    long first_FAT_block = getBlocksize(address)*getFATstarts(address);
+    long i = 0;
+    int current_entry = 0;
+    //Note that sizeof int is 4 bytes, ie 0x11223344
+    if( DEBUG ) printf("SIZEOF int%zu\n", sizeof(int) );
+    
+    if( DEBUG ) printf("First FAT block: %ld\n", first_FAT_block);
+
+     //4 entries per line
+    //FAT table is 50 blocks long (512*50 blocks)
+    //FAT starts at byte 1024 (0x400) to byte 25600 (0x6400)
+    //Range of FAT table 1024 to 26624 **CONFIRMED
+    
+    //Each entry is 4 bytes long.
+    //There are 4 entires per 16 bytes
+    long range_low = first_FAT_block;
+    long range_high = getBlocksize(address)*getFATblocks(address) + first_FAT_block;
+
+    if( DEBUG ) printf("getFreeBlocks FAT range_low is: %ld\n", range_low);
+    if( DEBUG ) printf("getFreeBlocks FAT range_high is: %ld\n", range_high);
+
+    for( i = range_low; i < range_high; i+=4 ) {
+
+        memcpy( &current_entry, (address+i), 4 );
+        current_entry = htonl(current_entry);
+        //if( i >= range_low && i < range_low + 256 ) 
+        //printf("%04lx Reading 0x%08x: %d\n", i, current_entry, current_entry);
+        if( current_entry == 0x00000000 ) free_blocks++;
+        else if ( current_entry == 0x00000001 ) res_blocks++;
+        else if ( current_entry > 0x00000002 &&
+                  current_entry < 0xFFFFFF00 ) alloc_blocks++;
+        else if ( current_entry == 0xFFFFFFFF ) eof_blocks++;
+    }
+}
+
+short getBlocksize( void* address ) {
+    short blocksize=0;
+    size_t blocksize_offset = 8;
+    size_t blocksize_width = 2;
+    memcpy( &blocksize, address+blocksize_offset, blocksize_width );
+    if( !is_bigendian() ) blocksize = htons(blocksize);
+    return blocksize;
+}
+
+long getBlockcount( void* address ) { 
+    long blockcount=0;
+    size_t blockcount_offset = 12;
+    size_t blockcount_width = 4;
+    memcpy( &blockcount, address+blockcount_offset, blockcount_width );
+    if( !is_bigendian() ) blockcount = htons(blockcount);
+    return blockcount;
+}
+long getFATstarts( void* address ) { 
+    long fat_starts=0;
+    size_t fat_starts_offset = 16;
+    size_t fat_starts_width = 4;
+    memcpy( &fat_starts, address+fat_starts_offset, fat_starts_width );
+    if( !is_bigendian() ) fat_starts = htons(fat_starts);
+    return fat_starts;
+}
+long getFATblocks( void* address ) { 
+    long fat_blocks=0;
+    size_t fat_blocks_offset = 20;
+    size_t fat_blocks_width = 4;
+    memcpy( &fat_blocks, address+fat_blocks_offset, fat_blocks_width );
+    if( !is_bigendian() ) fat_blocks = htons(fat_blocks);
+    return fat_blocks;
+}
+long getRootDirStarts( void* address ) { 
+    long root_dir_starts=0;
+    size_t root_dir_starts_offset = 24;
+    size_t root_dir_starts_width = 4;
+    memcpy( &root_dir_starts, address+root_dir_starts_offset, root_dir_starts_width );
+    if( !is_bigendian() ) root_dir_starts = htons(root_dir_starts);
+    return root_dir_starts;
+}
+long getRootDirBlocks( void* address ) { 
+    long root_dir_blocks=0;
+    size_t root_dir_blocks_offset = 28;
+    size_t root_dir_blocks_width = 4;
+    memcpy( &root_dir_blocks, address+root_dir_blocks_offset, root_dir_blocks_width );
+    if( !is_bigendian() ) root_dir_blocks = htons(root_dir_blocks);
+    return root_dir_blocks;
 }
