@@ -34,11 +34,16 @@ Allocated Blocks: 8
 #include <string.h>
 #include <inttypes.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 const int i = 1;
 #define is_bigendian() ( (*(char*)&i) == 0 )
 #define DEBUG 0
 
-//Prototypes
+//Prototypes DISKLIST
+void disklist( int argc, char* argv[] );
+
+//Prototypes DISKINFO
+void diskinfo( int argc, char* argv[] );
 short getBlocksize( void* );
 long getBlockcount( void* );
 long getFATstarts( void* );
@@ -55,21 +60,58 @@ int res_blocks=0;
 int alloc_blocks=0;
 int eof_blocks=0;
 
-int main( int argc, char** argv ) {
-    //FILE *fp;
-    //fp = fopen("test.img", "rb" );
+int main( int argc, char* argv[] ) {
+    #if defined(PART1)
+        diskinfo(argc,argv);
+	#elif defined(PART2)
+		disklist(argc,argv);
+    #else
+        #error "Part[1234] must be defined"
+    #endif
+    return 0;
+}
+
+void disklist( int argc, char* argv[] ) {
+
+	int fp = open( argv[1], O_RDWR );
+    struct stat buffer;
+    int status = fstat(fp, &buffer);
+    if( DEBUG ) printf("Status of buffer: %d\n", status);
+    if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
+    void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
+    if (address == MAP_FAILED) {
+                perror("Map source error\n");
+                exit(1);
+    }
+
+	//Start RootDir low range: 27136, End RootDir high range: 31232
+	printf("RootDir low: %ld\n", getRootDirStarts(address)*getBlocksize(address) );
+	printf("RootDir high %ld\n", getRootDirStarts(address)*getBlocksize(address) + 
+							   getRootDirBlocks(address)*getBlocksize(address));
+
+	int rootDirLow = getRootDirStarts(address)*getBlocksize(address);
+	int rootDirHigh = getRootDirStarts(address)*getBlocksize(address) + getRootDirBlocks(address)*getBlocksize(address);
+	
+	int i = 0;
+	short status = 0;
+	long filesize = 0;
+	unsigned int filename = 0;
+	int file_mod_time = 0;
+
+	for( i = rootDirLow; i < rootDirLow + 64; i+=64 ) {
+		
+	}
+
+	close(fp);
+}
+
+
+void diskinfo( int argc, char* argv[] ) {
     int fp = open( argv[1], O_RDWR );
     struct stat buffer;
     int status = fstat(fp, &buffer);
     if( DEBUG ) printf("Status of buffer: %d\n", status);
     if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
-
-    // NULL indicates the OS can decide where in memory to map the file.
-    // buffer.st_size: the length of the mapping
-    // PROT_READ pages can be read, PROT_WRITE pages can be written
-    // MAP_SHARED Share  this mapping.  Updates to the mapping are visible to other processes that map this file, and are carried through
-    // to the underlying file.  The file may not actually be updated until msync(2) or munmap() is called.
-    // MMAP returns a pointer to the start of the mapped file.
     void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
     if (address == MAP_FAILED) {
                 perror("Map source error\n");
@@ -100,6 +142,10 @@ int main( int argc, char** argv ) {
     close(fp);
 }
 
+short getDirectoryStatus( void* address ) {
+	//TODO create functions to retrieve specific data from directory entries
+}
+
 void getFreeBlocks( void* address ) {
 
     /* Here we have transition from end of FAT to allocated files
@@ -112,7 +158,7 @@ void getFreeBlocks( void* address ) {
     //26624 0x6800 might be where some files are allocated
     long first_FAT_block = getBlocksize(address)*getFATstarts(address);
     long i = 0;
-    int current_entry = 0;
+    unsigned int current_entry = 0;
     //Note that sizeof int is 4 bytes, ie 0x11223344
     if( DEBUG ) printf("SIZEOF int%zu\n", sizeof(int) );
     
