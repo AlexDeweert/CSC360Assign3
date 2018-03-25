@@ -39,8 +39,49 @@ const int i = 1;
 #define is_bigendian() ( (*(char*)&i) == 0 )
 #define DEBUG 0
 
+
+//Structs
+/*typedef struct DirectoryEntry {
+	struct DirectoryEntry* next;
+	uint8_t status;
+	long size;
+	unsigned int name;
+	int mod_time;
+} DirectoryEntry;*/
+
+//Time and date
+struct __attribute__((__packed__)) dir_entry_timedate_t {
+	uint16_t year;
+	uint8_t month;
+	uint8_t day;
+	uint8_t hour;
+	uint8_t minute;
+	uint8_t second;
+};
+//Directory entry
+struct __attribute__((__packed__)) dir_entry_t {
+	uint8_t status;
+	uint32_t starting_block;
+	uint32_t block_count;
+	uint32_t size;
+	struct dir_entry_timedate_t modify_time;
+	struct dir_entry_timedate_t create_time;
+	uint8_t filename[31];
+	uint8_t unused[6];
+};
+
+
+
 //Prototypes DISKLIST
 void disklist( int argc, char* argv[] );
+uint8_t getDirectoryEntryStatus( void* address, int offset );
+uint32_t getDirectoryEntryStartingBlock( void* address, int offset );
+uint32_t getDirectoryEntryNumBlocks( void* address, int offset );
+uint32_t getDirectoryEntryFileSize( void* address, int offset );
+//void populateDirectoryEntry_dateTimeStructure( void*, int, dir_entry_timedate_t* );
+void populateDirectoryEntry_timedateStructure_create( void* address, int offset, struct dir_entry_timedate_t* ttemp );
+void populateDirectoryEntry_timedateStructure_mod( void* address, int offset, struct dir_entry_timedate_t* ttemp );
+void populateFilename( void* address, int offset, struct dir_entry_t* temp );
 
 //Prototypes DISKINFO
 void diskinfo( int argc, char* argv[] );
@@ -59,6 +100,8 @@ int free_blocks=0;
 int res_blocks=0;
 int alloc_blocks=0;
 int eof_blocks=0;
+//For disklist IF a linked file list is made
+int dir_list_count=0;
 
 int main( int argc, char* argv[] ) {
     #if defined(PART1)
@@ -90,18 +133,88 @@ void disklist( int argc, char* argv[] ) {
 							   getRootDirBlocks(address)*getBlocksize(address));
 
 	int rootDirLow = getRootDirStarts(address)*getBlocksize(address);
-	int rootDirHigh = getRootDirStarts(address)*getBlocksize(address) + getRootDirBlocks(address)*getBlocksize(address);
+	//int rootDirHigh = getRootDirStarts(address)*getBlocksize(address) + getRootDirBlocks(address)*getBlocksize(address);
 	
 	int i = 0;
-	short status = 0;
-	long filesize = 0;
-	unsigned int filename = 0;
-	int file_mod_time = 0;
 
-	for( i = rootDirLow; i < rootDirLow + 64; i+=64 ) {
+	/*This packed struct might be useful later on
+	for writing a file to disk; could be turned into
+	a function for writing any number of files*/
+	struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
+	/*Create_time*/
+	struct dir_entry_timedate_t* ttemp = malloc( sizeof(struct dir_entry_timedate_t) );
+	/*Mod_time*/
+	struct dir_entry_timedate_t* tttemp = malloc( sizeof(struct dir_entry_timedate_t) );
+
+	for( i = rootDirLow; i < rootDirLow + 256; i+=64 ) {
+		if( DEBUG ) printf("[Disklist-main()] Start of entry (in bytes): %d\n", i);
+		(*temp).status = getDirectoryEntryStatus(address,i);
+		(*temp).starting_block = getDirectoryEntryStartingBlock(address,i);
+		(*temp).block_count = getDirectoryEntryNumBlocks(address,i);
+		(*temp).size = getDirectoryEntryFileSize(address,i);
+		//Here we populate a temporary timedate struct...
+		populateDirectoryEntry_timedateStructure_create(address,i,ttemp);
+		populateDirectoryEntry_timedateStructure_mod(address,i,tttemp);
+		//And assign the temporary dir entry struct create_time attribute
+		//to the temporary timedate object.
+		//RECALL we're just writing over the same memory
+		//space, so if you need MULTIPLE copies of this, we'll
+		//have to malloc up more objects and store them
+		(*temp).create_time = (*ttemp);
+		(*temp).modify_time = (*tttemp);
+		//Memset filename to nulls first
+		//Same issue as above though, to expand this we might
+		//need to malloc up more structs and init all of their
+		//filename array attributes to null chars.
+		memset( (*temp).filename, '\0', 31 );
+		populateFilename(address,i,temp);
+		if( DEBUG ) printf("Temp struct status: 0x%02x\n", (*temp).status);
+		if( DEBUG ) printf("Temp struct starting_block: 0x%08x\n", (*temp).starting_block);
+		if( DEBUG ) printf("Temp struct num_blocks: 0x%08x\n", (*temp).block_count);
+		if( DEBUG ) printf("Temp struct file_size (hex): 0x%08x\n", (*temp).size);
+		if( DEBUG ) printf("Temp struct file_size (bytes): %d\n", (*temp).size);
+		if( DEBUG )	printf("Create year: 0x%04x\n", (*temp).create_time.year);
+		if( DEBUG ) printf("Create month: 0x%04x\n", (*temp).create_time.month);
+		if( DEBUG ) printf("Create day: 0x%04x\n", (*temp).create_time.day);
+		if( DEBUG ) printf("Create hour: 0x%04x\n", (*temp).create_time.hour);
+		if( DEBUG ) printf("Create minute: 0x%04x\n", (*temp).create_time.minute);
+		if( DEBUG ) printf("Create second: 0x%04x\n", (*temp).create_time.second);
+		if( DEBUG ) printf("Mod year: 0x%04x\n", (*temp).modify_time.year);
+		if( DEBUG )	printf("Mod month: 0x%04x\n", (*temp).modify_time.month);
+		if( DEBUG )	printf("Mod day: 0x%04x\n", (*temp).modify_time.day);
+		if( DEBUG )	printf("Mod hour: 0x%04x\n", (*temp).modify_time.hour);
+		if( DEBUG )	printf("Mod minute: 0x%04x\n", (*temp).modify_time.minute);
+		if( DEBUG )	printf("Mod second: 0x%04x\n", (*temp).modify_time.second);
+		if( DEBUG )	printf("Temp struct filename: %s\n", (*temp).filename );
 		
+		//TODO Implement ability to specify a directory listing
+		//Clearly will need to add a new ARGUMENT check for disklist(argv)
+		//But also, need to have a reference to all available directories
+		//This might involve a tree structure of some kind
+		//Consider a directory with UP TO 128 directory entries
+		//Note that the ROOT directory has 8 blocks.
+		//Every block has 512 bytes, 64 bytes per entry is 8 entries per block
+		//So the ROOT directory can have up to 64 entries (8block*8entries=64)
+		//However, we can add directories with arbitrarily more
+		//blocks.
+
+		//IDEA: When someone calls disklist /sub_dir, note the name of the sub_dir
+		//Conduct the disklist checks and populate all the necessary info, but more than that
+		//We'll have to POSSIBLY conduct a recursive directory creation
+		//There might be an easier way though: If we know a MAX NUMBER OF ENTRIES (N) per directory
+		//then each "directory" block at a specific address, can reference at most (N) number of
+		//other directories, or (N) number of files. So each directory can be represented by an array
+		//of struct pointers, pointing to directory entries (per inode scheme).
+		if( (*temp).status == 0x3 ) {
+			printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
+			(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
+			(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
+		}
 	}
 
+	free( temp );
+	free( ttemp);
+	free( tttemp );
 	close(fp);
 }
 
@@ -142,10 +255,109 @@ void diskinfo( int argc, char* argv[] ) {
     close(fp);
 }
 
-short getDirectoryStatus( void* address ) {
-	//TODO create functions to retrieve specific data from directory entries
+void populateFilename( void* address, int offset, struct dir_entry_t* temp ) {
+	memcpy( &(temp->filename), address+offset+27, 30 );
 }
 
+//DIRECTORY ENTRY MODIFICATION TIME
+void populateDirectoryEntry_timedateStructure_mod( void* address, int offset, struct dir_entry_timedate_t* ttemp ) {
+	uint16_t year;
+	uint8_t month;
+	uint8_t day;
+	uint8_t hour;
+	uint8_t minute;
+	uint8_t second;
+	memcpy( &year, address+offset+20, 2 );
+	memcpy( &month, address+offset+22, 1 );
+	memcpy( &day, address+offset+23, 1 );
+	memcpy( &hour, address+offset+24, 1 );
+	memcpy( &minute, address+offset+25, 1 );
+	memcpy( &second, address+offset+26, 1 );
+	if( !is_bigendian() ) year = htons( year );
+	(*ttemp).year = year;
+	(*ttemp).month = month;
+	(*ttemp).day = day;
+	(*ttemp).hour = hour;
+	(*ttemp).minute = minute;
+	(*ttemp).second = second;
+}
+//DIRECTORY ENTRY CREATE TIME
+void populateDirectoryEntry_timedateStructure_create( void* address, int offset, struct dir_entry_timedate_t* ttemp ) {
+	uint16_t year;
+	uint8_t month;
+	uint8_t day;
+	uint8_t hour;
+	uint8_t minute;
+	uint8_t second;
+	memcpy( &year, address+offset+13, 2 );
+	memcpy( &month, address+offset+15, 1 );
+	memcpy( &day, address+offset+16, 1 );
+	memcpy( &hour, address+offset+17, 1 );
+	memcpy( &minute, address+offset+18, 1 );
+	memcpy( &second, address+offset+19, 1 );
+	if( !is_bigendian() ) year = htons( year );
+	(*ttemp).year = year;
+	(*ttemp).month = month;
+	(*ttemp).day = day;
+	(*ttemp).hour = hour;
+	(*ttemp).minute = minute;
+	(*ttemp).second = second;
+}
+
+//DIRECTORY ENTRY FILE SIZE (IN BYTES)
+uint32_t getDirectoryEntryFileSize( void* address, int offset ) {
+	uint32_t file_size;
+	memcpy( &file_size, address+offset+9, 4);
+	if( !is_bigendian() ) file_size = htonl( file_size );
+	return file_size;
+}
+
+//DIRECTORY ENTRY NUM BLOCKS
+uint32_t getDirectoryEntryNumBlocks( void* address, int offset ) {
+	uint32_t num_blocks;
+	//try 3 bytes in for starting block
+	memcpy( &num_blocks, address+offset+5, 4);
+	if( !is_bigendian() ) num_blocks = htonl( num_blocks );
+	return num_blocks;
+}
+
+//DIRECTORY ENTRY STARTING BLOCK
+uint32_t getDirectoryEntryStartingBlock( void* address, int offset ) {
+	uint32_t starting_block;
+	//try 3 bytes in for starting block
+	memcpy( &starting_block, address+offset+1, 4);
+	if( !is_bigendian() ) starting_block = htonl( starting_block );
+	return starting_block;
+}
+
+
+//Return exactly 8 bit integer (1 byte status)
+uint8_t getDirectoryEntryStatus( void* address, int offset ) {
+	//TODO create functions to retrieve specific data from directory entries
+	
+	//00000011 value of the status "bitmask" denoting a "file" status
+
+	//This is the bitmask applied to
+	//FILE or NOT FILE
+
+	//Only ONE of bit 1, or bit 2, can be on, not both.
+	//either 0101 or 0011
+	//        Dir    File
+	//       0111    0111
+	//and	 0101    0011 
+	//xor    0010    0100 <-- 2 or 4
+
+	uint8_t status_bits;
+	if( DEBUG ) printf("[getDirectoryStatus()] Reading from: %04x\n", offset);
+	memcpy( &status_bits, address+offset, 1 );
+	//if( !is_bigendian() ) status_bits = htons( status_bits );
+	//don't need to do htons etc. on single bytes.
+	if( DEBUG ) printf("Status found to be: 0x%02x\n", status_bits);
+	return status_bits;
+}
+
+
+//TODO long formatting for i likely not necessary here
 void getFreeBlocks( void* address ) {
 
     /* Here we have transition from end of FAT to allocated files
@@ -180,7 +392,7 @@ void getFreeBlocks( void* address ) {
     for( i = range_low; i < range_high; i+=4 ) {
 
         memcpy( &current_entry, (address+i), 4 );
-        current_entry = htonl(current_entry);
+        if( !is_bigendian() ) current_entry = htonl(current_entry);
         //if( i >= range_low && i < range_low + 256 ) 
         //printf("%04lx Reading 0x%08x: %d\n", i, current_entry, current_entry);
         if( current_entry == 0x00000000 ) free_blocks++;
