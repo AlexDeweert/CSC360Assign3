@@ -116,106 +116,150 @@ int main( int argc, char* argv[] ) {
 
 void disklist( int argc, char* argv[] ) {
 
-	int fp = open( argv[1], O_RDWR );
-    struct stat buffer;
-    int status = fstat(fp, &buffer);
-    if( DEBUG ) printf("Status of buffer: %d\n", status);
-    if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
-    void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
-    if (address == MAP_FAILED) {
-                perror("Map source error\n");
-                exit(1);
-    }
 
-	//Start RootDir low range: 27136, End RootDir high range: 31232
-	printf("RootDir low: %ld\n", getRootDirStarts(address)*getBlocksize(address) );
-	printf("RootDir high %ld\n", getRootDirStarts(address)*getBlocksize(address) + 
-							   getRootDirBlocks(address)*getBlocksize(address));
-
-	int rootDirLow = getRootDirStarts(address)*getBlocksize(address);
-	//int rootDirHigh = getRootDirStarts(address)*getBlocksize(address) + getRootDirBlocks(address)*getBlocksize(address);
-	
-	int i = 0;
-
-	/*This packed struct might be useful later on
-	for writing a file to disk; could be turned into
-	a function for writing any number of files*/
-	struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
-	/*Create_time*/
-	struct dir_entry_timedate_t* ttemp = malloc( sizeof(struct dir_entry_timedate_t) );
-	/*Mod_time*/
-	struct dir_entry_timedate_t* tttemp = malloc( sizeof(struct dir_entry_timedate_t) );
-
-	for( i = rootDirLow; i < rootDirLow + 256; i+=64 ) {
-		if( DEBUG ) printf("[Disklist-main()] Start of entry (in bytes): %d\n", i);
-		(*temp).status = getDirectoryEntryStatus(address,i);
-		(*temp).starting_block = getDirectoryEntryStartingBlock(address,i);
-		(*temp).block_count = getDirectoryEntryNumBlocks(address,i);
-		(*temp).size = getDirectoryEntryFileSize(address,i);
-		//Here we populate a temporary timedate struct...
-		populateDirectoryEntry_timedateStructure_create(address,i,ttemp);
-		populateDirectoryEntry_timedateStructure_mod(address,i,tttemp);
-		//And assign the temporary dir entry struct create_time attribute
-		//to the temporary timedate object.
-		//RECALL we're just writing over the same memory
-		//space, so if you need MULTIPLE copies of this, we'll
-		//have to malloc up more objects and store them
-		(*temp).create_time = (*ttemp);
-		(*temp).modify_time = (*tttemp);
-		//Memset filename to nulls first
-		//Same issue as above though, to expand this we might
-		//need to malloc up more structs and init all of their
-		//filename array attributes to null chars.
-		memset( (*temp).filename, '\0', 31 );
-		populateFilename(address,i,temp);
-		if( DEBUG ) printf("Temp struct status: 0x%02x\n", (*temp).status);
-		if( DEBUG ) printf("Temp struct starting_block: 0x%08x\n", (*temp).starting_block);
-		if( DEBUG ) printf("Temp struct num_blocks: 0x%08x\n", (*temp).block_count);
-		if( DEBUG ) printf("Temp struct file_size (hex): 0x%08x\n", (*temp).size);
-		if( DEBUG ) printf("Temp struct file_size (bytes): %d\n", (*temp).size);
-		if( DEBUG )	printf("Create year: 0x%04x\n", (*temp).create_time.year);
-		if( DEBUG ) printf("Create month: 0x%04x\n", (*temp).create_time.month);
-		if( DEBUG ) printf("Create day: 0x%04x\n", (*temp).create_time.day);
-		if( DEBUG ) printf("Create hour: 0x%04x\n", (*temp).create_time.hour);
-		if( DEBUG ) printf("Create minute: 0x%04x\n", (*temp).create_time.minute);
-		if( DEBUG ) printf("Create second: 0x%04x\n", (*temp).create_time.second);
-		if( DEBUG ) printf("Mod year: 0x%04x\n", (*temp).modify_time.year);
-		if( DEBUG )	printf("Mod month: 0x%04x\n", (*temp).modify_time.month);
-		if( DEBUG )	printf("Mod day: 0x%04x\n", (*temp).modify_time.day);
-		if( DEBUG )	printf("Mod hour: 0x%04x\n", (*temp).modify_time.hour);
-		if( DEBUG )	printf("Mod minute: 0x%04x\n", (*temp).modify_time.minute);
-		if( DEBUG )	printf("Mod second: 0x%04x\n", (*temp).modify_time.second);
-		if( DEBUG )	printf("Temp struct filename: %s\n", (*temp).filename );
-		
-		//TODO Implement ability to specify a directory listing
-		//Clearly will need to add a new ARGUMENT check for disklist(argv)
-		//But also, need to have a reference to all available directories
-		//This might involve a tree structure of some kind
-		//Consider a directory with UP TO 128 directory entries
-		//Note that the ROOT directory has 8 blocks.
-		//Every block has 512 bytes, 64 bytes per entry is 8 entries per block
-		//So the ROOT directory can have up to 64 entries (8block*8entries=64)
-		//However, we can add directories with arbitrarily more
-		//blocks.
-
-		//IDEA: When someone calls disklist /sub_dir, note the name of the sub_dir
-		//Conduct the disklist checks and populate all the necessary info, but more than that
-		//We'll have to POSSIBLY conduct a recursive directory creation
-		//There might be an easier way though: If we know a MAX NUMBER OF ENTRIES (N) per directory
-		//then each "directory" block at a specific address, can reference at most (N) number of
-		//other directories, or (N) number of files. So each directory can be represented by an array
-		//of struct pointers, pointing to directory entries (per inode scheme).
-		if( (*temp).status == 0x3 ) {
-			printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
-			(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
-			(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
-		}
+	if( argc < 3 ) {
+		printf("Error: Not enough arguments!! Try ./disklist test.img /directory\n");
+		exit(1);
 	}
+	else if( argc == 3 ){
+		int fp = open( argv[1], O_RDWR );
+		struct stat buffer;
+		int status = fstat(fp, &buffer);
+		if( DEBUG ) printf("Status of buffer: %d\n", status);
+		if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
+		void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
+		if (address == MAP_FAILED) {
+					perror("Map source error\n");
+					exit(1);
+		}
 
-	free( temp );
-	free( ttemp);
-	free( tttemp );
-	close(fp);
+		//The current directory byte range
+		int currentDirLow;
+		int currentDirHigh;
+		int i = 0;
+		//Here we check which subdirectory to go to
+		//If arg 3 is just '/' we calculate root
+		if( !strcmp( argv[2],"/" ) ) {
+			currentDirLow = getRootDirStarts(address)*getBlocksize(address);
+			currentDirHigh = currentDirLow + getRootDirBlocks(address)*getBlocksize(address);
+			//Start RootDir low range: 27136, End RootDir high range: 31232
+			printf("RootDir low: %ld\n", getRootDirStarts(address)*getBlocksize(address) );
+			printf("RootDir high %ld\n", getRootDirStarts(address)*getBlocksize(address) + 
+									   getRootDirBlocks(address)*getBlocksize(address));
+
+		}
+		//Otherwise the subdirectory was specified by name
+		//If that's the case then we have to search for the starting block
+		//of the subdirectory in question.
+		// 1) Get subdirectory name (from arg)
+		//		   1.1) Note that if arg3 is /subdir1/subdir2/... we only need to check root for subdir1 and go there
+		//				if it's actually present. Otherwise we gracefully exit. Similarly for subdir2...subdirN
+		//
+		// 2) Search through all entries in the root (or current) directory for current parsed arg (ie /subdir1/subdir2/...)
+		//	  Side note here, we can't know ahead of time if the subdir actually exists in the Filesystem.
+		//    This can be solved efficiently (in execution) with a nice graph and search algo
+		//	  For the sake of time (actually getting this done) maybe we can just do a brute force
+		//	  search every time instead of something elegant. Ie; scan root (if found go to subdir) repeat
+		//	  until the very last subdirectory is linearly scanned, if no match return error and exit.
+		//		2.1) If the subdirectory name is a match, also ensure it's actually a dir, not a file
+		//			2.1.1) If it's a file, error and exit
+		//			2.1.2) If it's a DIR then set "dirLow = getSubdirectoryStarts(address)*getBlocksize(address)"
+		//				   and iterate as you would in the root directory
+
+		//TODO implement subdirectory search. We might need a loop which calculates
+		//the current directory block for the next subdirectory name, then updates
+		//the currentDirHigh and currentDirLow values when found (do after part3 and 4 if time)
+		else {
+			printf("Error, subdirectories other than \"root\" are not yet implemented\n");
+			exit(1);
+		}
+
+		//HERE WE ACTUALLY LIST THE DIRECTORY CONTENTS
+		//(prior to this we're just searching for the correct location to list)
+
+		/*This packed struct might be useful later on
+		for writing a file to disk; could be turned into
+		a function for writing any number of files*/
+		struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
+		/*Create_time*/
+		struct dir_entry_timedate_t* ttemp = malloc( sizeof(struct dir_entry_timedate_t) );
+		/*Mod_time*/
+		struct dir_entry_timedate_t* tttemp = malloc( sizeof(struct dir_entry_timedate_t) );
+
+		for( i = currentDirLow; i < currentDirHigh; i+=64 ) {
+			if( DEBUG ) printf("[Disklist-main()] Start of entry (in bytes): %d\n", i);
+			(*temp).status = getDirectoryEntryStatus(address,i);
+			(*temp).starting_block = getDirectoryEntryStartingBlock(address,i);
+			(*temp).block_count = getDirectoryEntryNumBlocks(address,i);
+			(*temp).size = getDirectoryEntryFileSize(address,i);
+			//Here we populate a temporary timedate struct...
+			populateDirectoryEntry_timedateStructure_create(address,i,ttemp);
+			populateDirectoryEntry_timedateStructure_mod(address,i,tttemp);
+			//And assign the temporary dir entry struct create_time attribute
+			//to the temporary timedate object.
+			//RECALL we're just writing over the same memory
+			//space, so if you need MULTIPLE copies of this, we'll
+			//have to malloc up more objects and store them
+			(*temp).create_time = (*ttemp);
+			(*temp).modify_time = (*tttemp);
+			//Memset filename to nulls first
+			//Same issue as above though, to expand this we might
+			//need to malloc up more structs and init all of their
+			//filename array attributes to null chars.
+			memset( (*temp).filename, '\0', 31 );
+			populateFilename(address,i,temp);
+			if( DEBUG ) printf("Temp struct status: 0x%02x\n", (*temp).status);
+			if( DEBUG ) printf("Temp struct starting_block: 0x%08x\n", (*temp).starting_block);
+			if( DEBUG ) printf("Temp struct num_blocks: 0x%08x\n", (*temp).block_count);
+			if( DEBUG ) printf("Temp struct file_size (hex): 0x%08x\n", (*temp).size);
+			if( DEBUG ) printf("Temp struct file_size (bytes): %d\n", (*temp).size);
+			if( DEBUG )	printf("Create year: 0x%04x\n", (*temp).create_time.year);
+			if( DEBUG ) printf("Create month: 0x%04x\n", (*temp).create_time.month);
+			if( DEBUG ) printf("Create day: 0x%04x\n", (*temp).create_time.day);
+			if( DEBUG ) printf("Create hour: 0x%04x\n", (*temp).create_time.hour);
+			if( DEBUG ) printf("Create minute: 0x%04x\n", (*temp).create_time.minute);
+			if( DEBUG ) printf("Create second: 0x%04x\n", (*temp).create_time.second);
+			if( DEBUG ) printf("Mod year: 0x%04x\n", (*temp).modify_time.year);
+			if( DEBUG )	printf("Mod month: 0x%04x\n", (*temp).modify_time.month);
+			if( DEBUG )	printf("Mod day: 0x%04x\n", (*temp).modify_time.day);
+			if( DEBUG )	printf("Mod hour: 0x%04x\n", (*temp).modify_time.hour);
+			if( DEBUG )	printf("Mod minute: 0x%04x\n", (*temp).modify_time.minute);
+			if( DEBUG )	printf("Mod second: 0x%04x\n", (*temp).modify_time.second);
+			if( DEBUG )	printf("Temp struct filename: %s\n", (*temp).filename );
+			
+			//TODO Implement ability to specify a directory listing
+			//Clearly will need to add a new ARGUMENT check for disklist(argv)
+			//But also, need to have a reference to all available directories
+			//This might involve a tree structure of some kind
+			//Consider a directory with UP TO 128 directory entries
+			//Note that the ROOT directory has 8 blocks.
+			//Every block has 512 bytes, 64 bytes per entry is 8 entries per block
+			//So the ROOT directory can have up to 64 entries (8block*8entries=64)
+			//However, we can add directories with arbitrarily more
+			//blocks.
+
+			//IDEA: When someone calls disklist /sub_dir, note the name of the sub_dir
+			//Conduct the disklist checks and populate all the necessary info, but more than that
+			//We'll have to POSSIBLY conduct a recursive directory creation
+			//There might be an easier way though: If we know a MAX NUMBER OF ENTRIES (N) per directory
+			//then each "directory" block at a specific address, can reference at most (N) number of
+			//other directories, or (N) number of files. So each directory can be represented by an array
+			//of struct pointers, pointing to directory entries (per inode scheme).
+			if( (*temp).status == 0x3 ) {
+				printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
+				(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
+				(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
+			}
+		}
+
+		free( temp );
+		free( ttemp);
+		free( tttemp );
+		close(fp);
+	}
+	else {
+		printf("Error, too many arguments! Try: ./disklist test.img /sub_dir\n");
+	}
 }
 
 
