@@ -70,7 +70,8 @@ struct __attribute__((__packed__)) dir_entry_t {
 	uint8_t unused[6];
 };
 
-
+//Prototypes DISKGET
+void diskget( int argc, char* argv[] );
 
 //Prototypes DISKLIST
 void disklist( int argc, char* argv[] );
@@ -108,17 +109,210 @@ int main( int argc, char* argv[] ) {
         diskinfo(argc,argv);
 	#elif defined(PART2)
 		disklist(argc,argv);
+	#elif defined(PART3)
+		diskget(argc,argv);
     #else
         #error "Part[1234] must be defined"
     #endif
     return 0;
 }
 
+//************* DISK GET ****************
+void diskget( int argc, char* argv[] ) {
+	int i = 0;	
+	if( argc < 4 ) {
+		printf("Error, not enough arguments!! Try ./disklist test.img /img_dir/file.txt renamed_file.txt\n");
+		exit(1);
+	}
+	else if( argc == 4 ){ //program name, disk.img, subdir/filename, renamed_filename
+		
+		/*MAP THE IMAGE FILE*/
+		//First map the image file
+		//mmap the disk.img to memory, get with "address" pointer
+		int fp = open( argv[1], O_RDWR );
+		struct stat buffer;
+		fstat(fp, &buffer);
+		void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
+		if (address == MAP_FAILED) { perror("Map source error\n"); exit(1); }
+
+		
+		/*PARSE IN THE PATH*/
+		//Parse argv[2] into an array of subdir names, or filenames, path[parse_count]
+		char** path;
+		char delim[2] = "/";
+		int pathcount = 0;
+		char* token = strtok( argv[2], delim );
+		while( token != NULL ) {
+			if( pathcount == 0 ) {
+				path = (char**) malloc(sizeof(char*));
+			}
+			else {
+				path = (char**) realloc( path,pathcount );
+			}	
+			printf("Token: %s\n", token);
+			path[pathcount] = malloc( strlen(token)*sizeof(char) );
+			printf("Reallocating, pathcount: %d\n", pathcount);
+			strncpy( path[pathcount], token, strlen(token) );
+			token = strtok(NULL, delim);
+			pathcount++;
+		}
+
+		/*SCAN THROUGH DIRECTORY BLOCKS TO FIND FILENAME*/
+		//While !file_found
+		int file_found = 0;
+		//int atByteAddress = 0;
+		char cur_entry_name[31];//the current filename to compare to path[path_index]
+		//int cur_entry_starting_block=0;//need this to spec low and high range for iteration
+		int currentDirLow;
+		int currentDirHigh;
+		//A temp file struct to compare the filename we want to copy
+		struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
+		int path_index = 0; //root is 0, /path1 is 1, etc.
+		memset( cur_entry_name, '\0', 31 );
+
+		//Only need to loop as many times as there are path name directories
+		//since filenames can look like directories (ie Makefile) we loop at most pathcount # of times
+		//Moreover, if file found no need to loop
+		//Moreover, if path_index == pathcount-1, this means that the end has been reached
+		//and the file hasn't been found in the current subdir
+		while( path_index < pathcount && !file_found ) {
+
+			//Find path[0..i] "filename" or "subdir" name in current block
+			//Set the directory byte range for searching ability
+			//Here we check which subdirectory to go to
+			//Start at the root (so path index is 0)
+			if( path_index == 0 ) {
+				//Start RootDir low range: 27136, End RootDir high range: 31232
+				currentDirLow = getRootDirStarts(address)*getBlocksize(address);
+				currentDirHigh = currentDirLow + getRootDirBlocks(address)*getBlocksize(address);
+			}
+
+			//Need to differentiate whether we're iterating on a possible subdir,
+			//or a possible filename.
+
+			//We have the directory byte range, now we must scan through, populating
+			//each entry in the range as we did in disklist, after every population,
+			//we compare the filename. If it's a match, set file_found = true, then start copying process.
+			//if it's NOT a match (we're only doing root for now), then we exit with "File not found"
+
+			/*CREATE FILE INFO STRUCTS FOR COMPARISONS AND "NEXT" INFO*/
+			for( i = currentDirLow; i < currentDirHigh; i+=64 ) {
+				printf("Trying to find %s...\n", path[path_index]);
+				printf("In block; iterating from %d. Low is %d. High is %d\n", i, currentDirLow, currentDirHigh);
+				if( DEBUG ) printf("[Diskget-main()] Start of entry (in bytes): %d\n", i);
+				(*temp).status = getDirectoryEntryStatus(address,i);
+				(*temp).starting_block = getDirectoryEntryStartingBlock(address,i);
+				(*temp).block_count = getDirectoryEntryNumBlocks(address,i);
+				(*temp).size = getDirectoryEntryFileSize(address,i);
+				//Memset filename to nulls first
+				memset( (*temp).filename, '\0', 31 );
+				populateFilename(address,i,temp);
+				//If the current entry is a file, AND the filename equals the specified path file
+				//then we can stop iterating and start copying
+				if( (*temp).status == 0x3 && !strcmp( path[path_index], (char*)(*temp).filename ) ) {
+					printf("FILE FOUND (see info below)\n");
+					printf("Diskget struct status: 0x%02x\n", (*temp).status);
+					printf("Diskget struct starting_block: 0x%08x\n", (*temp).starting_block);
+					printf("Diskget struct num_blocks: 0x%08x\n", (*temp).block_count);
+					printf("Diskget struct file_size (hex): 0x%08x\n", (*temp).size);
+					printf("Diskget struct file_size (bytes): %d\n", (*temp).size);
+					printf("Diskget struct filename: %s\n", (*temp).filename );
+					file_found = 1;//true
+					break;
+				}
+
+				else if( (*temp).status == 0x5 && !strcmp( path[path_index], (char*)(*temp).filename ) ) {
+					printf("Found subdir, going to next subdir...\n");
+					/*UPDATE THE BYTE RANGE HERE, CRITICAL
+					Can be done from the file struct information*/
+
+					//only increment path index if subdir actually found
+					//from current dir
+					path_index++;
+					break;
+				}
+				//Or we got to the end of the block and nothing found
+				//we just break
+				//TODO ensure the last file in directory block is REALLY being read
+				else if( i == currentDirHigh-64 ){ 					printf("Nothing found\n");
+					path_index = pathcount;//just to exit while loop					
+					break;
+				}
+			}
+			
+			//If we get here, then either
+
+
+			//If we get through the entire root block and don't find what we're looking for
+			//then we don't loop again. If file found great, but if file not found after the
+			//first iteration, we don't do it again.
+
+			//TODO this is the case when we need to go into another directory level
+			//ELSE: MUST SET CURRENT DIR LOW, and CURRENT DIR HIGH if we go to new directory
+			//else we must search in a subdirectory
+			//We have to do this if we're not looking in root dir && there's actually a path other than "/" ie "/dir" or "/file.txt"
+			//else if( path_index != 0 && pathcount > 0 ) {
+			//	currentDirLow = cur_entry_starting_block*getBlocksize(address);
+			//	currentDirHigh = currentDirLow + 
+			//}
+
+				//(if file then begin copying) set file_found = true
+				//(else go to block pointed to by path[i])
+			
+			/*TODO fix this when it's necessary, deal with root for now*/
+			//We have to search the next path now
+			//Check if the pathcount larger than the path_index, which means there are more
+			//things (files or dirs) to increment path_index.
+			//If pathcount is 1, then it was just the root ie command was ./diskget /file.txt renamed.txt
+				//So pathcount (1) > path_index(0) is true, path_index++ puts us at "file.txt"
+			//Else pathcount is 2
+			//if( pathcount > path_index) path_index++;
+		}
+				
+		//Now we found the file, we're in a specific subdir (ie at block x) get the file starting block
+		//Based on the file information, create an array to hold file block references; file_blocks[getNumBlocks()]
+		//also create an buffer array of 1 byte long hex-values; ie FF
+			//The data type might be uint8_t file_hex_bytes[file_byte_size]
+		
+		//Look in FAT for file starting block X, which contains Y, go to Y, get Y-next etc
+			//For each link (starting block, Y, Y-next etc) add the value to file_blocks[ 0...num_blocks-1 ]
+
+		//int block_range_low;
+		//int block_range_high;
+		//int byte_counter=0;
+		//For each refrence in file_blocks
+			//Go to the block referenced ( ie; offset is: file_blocks[n] * blockSize )
+			//Set the block_range_low = file_blocks[n]*blockSize
+			//Set the block_range_high = block_range_low + blockSize
+			//for num_blocks in file_blocks array:
+				//for all bytes in range block_range_low to block_range_high
+					//Copy hex-byte-pair to file_hex_bytes (previously defined as large as file size)
+					//Assume that we don't need to worry about big-endian/little-endian for now
+					//bytecount++
+		
+		//Open a file (with the same name as the located file) in current directory in linux
+		//Write the file_hex_bytes array, byte-by-byte, to the open file
+		//Finally, close the file.
+
+
+		if( file_found == 0 ) {
+			printf("File not found\n");
+			exit(1);
+		}
+	}
+	else{
+		printf("Error, too many arguments!! Try ./disklist test.img /img_dir/file.txt renamed_file.txt\n");
+		exit(1); 
+	}
+		
+}
+
+//************* DISK LIST ****************
 void disklist( int argc, char* argv[] ) {
 
 
 	if( argc < 3 ) {
-		printf("Error: Not enough arguments!! Try ./disklist test.img /directory\n");
+		printf("Error, not enough arguments!! Try ./disklist test.img /directory\n");
 		exit(1);
 	}
 	else if( argc == 3 ){
@@ -262,43 +456,7 @@ void disklist( int argc, char* argv[] ) {
 	}
 }
 
-
-void diskinfo( int argc, char* argv[] ) {
-    int fp = open( argv[1], O_RDWR );
-    struct stat buffer;
-    int status = fstat(fp, &buffer);
-    if( DEBUG ) printf("Status of buffer: %d\n", status);
-    if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
-    void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
-    if (address == MAP_FAILED) {
-                perror("Map source error\n");
-                exit(1);
-    }
-   
-    printf("Super block information:\n");
-    printf("Block size: %hu\n", getBlocksize(address) );
-    if( DEBUG ) printf("Block Size HEX: 0x%08x\n", getBlocksize(address) );
-    printf("Block count: %ld\n", getBlockcount(address) );
-    if( DEBUG ) printf("Block Count HEX: 0x%08lx\n", getBlockcount(address) );
-    printf("FAT starts: %ld\n", getFATstarts(address) );
-    if( DEBUG ) printf("FAT starts HEX: 0x%08lx\n", getFATstarts(address) );
-    printf("FAT blocks: %ld\n", getFATblocks(address) );
-    if( DEBUG ) printf("FAT blocks HEX: 0x%08lx\n", getFATblocks(address) );
-    printf("Root directory start: %ld\n", getRootDirStarts(address) );
-    if( DEBUG ) printf("Root directory start HEX: 0x%08lx\n", getRootDirStarts(address) );
-    printf("Root directory blocks: %ld\n", getRootDirBlocks(address) );
-    if( DEBUG ) printf("Root directory blocks HEX: 0x%08lx\n", getRootDirBlocks(address) );
-    printf("\nFAT Information:\n");
-    getFreeBlocks(address);
-
-    printf("Free Blocks: %d\n", free_blocks);
-    printf("Reserved Blocks: %d\n", res_blocks);
-    printf("Allocated Blocks: %d\n", alloc_blocks);
-    if( DEBUG) printf("EOF Blocks: %d\n", eof_blocks);
-
-    close(fp);
-}
-
+//DIRECTORY ENTRY COPY FILENAME
 void populateFilename( void* address, int offset, struct dir_entry_t* temp ) {
 	memcpy( &(temp->filename), address+offset+27, 30 );
 }
@@ -400,6 +558,43 @@ uint8_t getDirectoryEntryStatus( void* address, int offset ) {
 	return status_bits;
 }
 
+
+//************* DISK INFO ****************
+void diskinfo( int argc, char* argv[] ) {
+    int fp = open( argv[1], O_RDWR );
+    struct stat buffer;
+    int status = fstat(fp, &buffer);
+    if( DEBUG ) printf("Status of buffer: %d\n", status);
+    if( DEBUG ) printf("Size of buffer: %zu bytes\n", (size_t)(buffer.st_size));
+    void* address=mmap(NULL, buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fp, 0);
+    if (address == MAP_FAILED) {
+                perror("Map source error\n");
+                exit(1);
+    }
+   
+    printf("Super block information:\n");
+    printf("Block size: %hu\n", getBlocksize(address) );
+    if( DEBUG ) printf("Block Size HEX: 0x%08x\n", getBlocksize(address) );
+    printf("Block count: %ld\n", getBlockcount(address) );
+    if( DEBUG ) printf("Block Count HEX: 0x%08lx\n", getBlockcount(address) );
+    printf("FAT starts: %ld\n", getFATstarts(address) );
+    if( DEBUG ) printf("FAT starts HEX: 0x%08lx\n", getFATstarts(address) );
+    printf("FAT blocks: %ld\n", getFATblocks(address) );
+    if( DEBUG ) printf("FAT blocks HEX: 0x%08lx\n", getFATblocks(address) );
+    printf("Root directory start: %ld\n", getRootDirStarts(address) );
+    if( DEBUG ) printf("Root directory start HEX: 0x%08lx\n", getRootDirStarts(address) );
+    printf("Root directory blocks: %ld\n", getRootDirBlocks(address) );
+    if( DEBUG ) printf("Root directory blocks HEX: 0x%08lx\n", getRootDirBlocks(address) );
+    printf("\nFAT Information:\n");
+    getFreeBlocks(address);
+
+    printf("Free Blocks: %d\n", free_blocks);
+    printf("Reserved Blocks: %d\n", res_blocks);
+    printf("Allocated Blocks: %d\n", alloc_blocks);
+    if( DEBUG) printf("EOF Blocks: %d\n", eof_blocks);
+
+    close(fp);
+}
 
 //TODO long formatting for i likely not necessary here
 void getFreeBlocks( void* address ) {
