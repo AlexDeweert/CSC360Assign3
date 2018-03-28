@@ -286,56 +286,72 @@ void diskget( int argc, char* argv[] ) {
 			exit(1);
 		}
 		
-		/*
+		
 		//Now we found the file, we're in a specific subdir (ie at block x) get the file starting block
 		//Based on the file information, create an array to hold file block references; file_blocks[getNumBlocks()]
-		//TODO I think that the FAT "next" pointers are only 1 byte wide
-		//but its possible that this might need to be revised at some point (ie if we're not getting the correct results)
-		unsigned int file_blocks[ (*temp).block_count ];
+
+		//I think that the FAT "next" pointers are only 1 byte wide WRONG: FAT entries are 4 bytes wide, dummy.
+		uint32_t file_blocks[ htonl(dir_entry->block_count) ];
 
 		//also create an buffer array of 1 byte long hex-values; ie FF
 		//The data type might be uint8_t file_hex_bytes[file_byte_size]
-		uint8_t file_hex_bytes[ (*temp).size+1 ];
+		uint8_t file_bytes[ dir_entry->size ];
 		
 		//Look in FAT for file starting block X, which contains Y, go to Y, get Y-next etc
 			//For each link (starting block, Y, Y-next etc) add the value to file_blocks[ 0...num_blocks-1 ]
-		unsigned int cur = (unsigned int)(*temp).starting_block;
-
-		//TODO Fix this because it's segfaulting
-		file_blocks[0] = cur;
-		for( i = 1; i < (*temp).block_count; i++ ) {
-			memcpy( &cur, address+getFATstarts(address)+(4*cur), 4);
-			file_blocks[i] = cur;
-			printf("block is %u\n", file_blocks[i]);
+		uint32_t cur = htonl(dir_entry->starting_block);
+		uint8_t k;
+		for( k = 0x00; k < htonl(dir_entry->block_count); k+= 0x01 ) {
+			printf("Looking at: %"PRIx64"\n", (uint64_t)(htonl(superblock->fat_start_block)*(htons(superblock->block_size)) + (cur*0x4)) );
+			printf("On file block: %d", (int)k);
+			file_blocks[k] = cur;
+			memcpy( &cur, address+(uint64_t)(htonl(superblock->fat_start_block)*(htons(superblock->block_size)) + (cur*0x4)), 4 ); 
+			cur = htonl(cur);
+			printf(", block is %"PRIx32", cur->next is %"PRIx32"\n", file_blocks[k], cur);
 		}
-
-		int block_range_low;
-		int block_range_high;
+		
+		//Now that we have all the block references, we copy byte-by-byte to an array of size dir_entry->filesize
+		uint64_t block_range_low;
+		uint64_t block_range_high;
 		//int byte_counter=0;
-		int bytecount=0;
+		uint64_t bytecount=0x00000000;
+		uint32_t m;
+		uint64_t b;
 		//For each refrence in file_blocks
-		for( i = 0; i < (*temp).block_count; i++ ) { //go to first file block
+		for( m = 0x00000000; m < htonl(dir_entry->block_count); m+=0x01 ) { //go to first file block
 			//Set the block_range_low = file_blocks[n]*blockSize
-			block_range_low = file_blocks[i]*getBlocksize(address);
+			printf("M: %d, %"PRIx32"\n", (int)m, m );
+			printf("On block %d Looking at: %"PRIx64"\n", m, (uint64_t)(file_blocks[m]*htons(superblock->block_size)));
+			block_range_low = (uint64_t)(file_blocks[m]*htons(superblock->block_size));
 			//Set the block_range_high = block_range_low + blockSize
-			block_range_high = block_range_low + getBlocksize(address);
+			block_range_high = (uint64_t)( block_range_low + htons(superblock->block_size) );
 			//for all bytes in range block_range_low to block_range_high
-			for( i = block_range_low; i < block_range_high; i++ ) {
+			for( b = block_range_low; b < block_range_high; b+=0x01 ) {
 				//Copy hex-byte-pair to file_hex_bytes (previously defined as large as file size)
-				memcpy( &file_hex_bytes[i], address+i, 1 );
-				bytecount++;
+				
+				if( bytecount <= htonl(dir_entry->size)) {
+					memcpy( &file_bytes[bytecount], address+b, 1 );
+					bytecount++;
+
+				}
+				else {
+					break;
+				}
 				//Assume that we don't need to worry about big-endian/little-endian for now
 				//bytecount++
 			}
 			
 		}
 
-					
+		for( m = 0x0; m < bytecount; m++ ) {
+			printf("%c", file_bytes[m]);
+			if( m%50 ==0 ) printf("\n");
+		}	
 		//Open a file (with the same name as the located file) in current directory in linux
 		//Write the file_hex_bytes array, byte-by-byte, to the open file
 		//Finally, close the file.
 		
-		*/
+		
 		int j;
 		for( j = 0; j < pathcount; j++) free( path[j] );
 		free(path);
