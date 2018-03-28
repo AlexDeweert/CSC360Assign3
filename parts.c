@@ -106,7 +106,7 @@ struct __attribute__((__packed__)) dir_entry_t {
 void diskget( int argc, char* argv[] );
 
 //Prototypes DISKLIST
-//void disklist( int argc, char* argv[] );
+void disklist( int argc, char* argv[] );
 uint8_t getDirectoryEntryStatus( void* address, int offset );
 uint32_t getDirectoryEntryStartingBlock( void* address, int offset );
 uint32_t getDirectoryEntryNumBlocks( void* address, int offset );
@@ -139,6 +139,8 @@ struct dir_entry_timedate_t* dir_entry_timedate_create;
 int main( int argc, char* argv[] ) {
     #if defined(PART1)
         diskinfo(argc,argv);
+	#elif defined(PART2)
+		disklist(argc,argv);
 	#elif defined(PART3)
 		diskget(argc,argv);
     #else
@@ -365,7 +367,7 @@ void diskget( int argc, char* argv[] ) {
 
 //************* DISK LIST ****************
 
-/*
+
 void disklist( int argc, char* argv[] ) {
 
 
@@ -384,21 +386,19 @@ void disklist( int argc, char* argv[] ) {
 					perror("Map source error\n");
 					exit(1);
 		}
+		superblock = address;
 
 		//The current directory byte range
-		int currentDirLow;
-		int currentDirHigh;
-		int i = 0;
+		uint64_t currentDirLow;
+		uint64_t currentDirHigh;
+		uint64_t i = 0x0000000000000000;	
 		//Here we check which subdirectory to go to
 		//If arg 3 is just '/' we calculate root
 		if( !strcmp( argv[2],"/" ) ) {
-			currentDirLow = getRootDirStarts(address)*getBlocksize(address);
-			currentDirHigh = currentDirLow + getRootDirBlocks(address)*getBlocksize(address);
-			//Start RootDir low range: 27136, End RootDir high range: 31232
-			printf("RootDir low: %ld\n", getRootDirStarts(address)*getBlocksize(address) );
-			printf("RootDir high %ld\n", getRootDirStarts(address)*getBlocksize(address) + 
-									   getRootDirBlocks(address)*getBlocksize(address));
-
+			//currentDirLow = getRootDirStarts(address)*getBlocksize(address);
+			//currentDirHigh = currentDirLow + getRootDirBlocks(address)*getBlocksize(address);
+			currentDirLow = (uint64_t)( htonl(superblock->root_dir_start_block)*htons(superblock->block_size) );
+			currentDirHigh = (uint64_t)( currentDirLow + htonl(superblock->root_dir_block_count)*htons(superblock->block_size) );
 		}
 		//Otherwise the subdirectory was specified by name
 		//If that's the case then we have to search for the starting block
@@ -429,91 +429,54 @@ void disklist( int argc, char* argv[] ) {
 		//HERE WE ACTUALLY LIST THE DIRECTORY CONTENTS
 		//(prior to this we're just searching for the correct location to list)
 
-		//This packed struct might be useful later on
-		//for writing a file to disk; could be turned into
-		//a function for writing any number of files
-		struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
+		//struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
 		//Create_time
-		struct dir_entry_timedate_t* ttemp = malloc( sizeof(struct dir_entry_timedate_t) );
-		Mod_time
-		struct dir_entry_timedate_t* tttemp = malloc( sizeof(struct dir_entry_timedate_t) );
+		//struct dir_entry_timedate_t* ttemp = malloc( sizeof(struct dir_entry_timedate_t) );
+		//Mod_time
+		//struct dir_entry_timedate_t* tttemp = malloc( sizeof(struct dir_entry_timedate_t) );
 
-		for( i = currentDirLow; i < currentDirHigh; i+=64 ) {
-			if( DEBUG ) printf("[Disklist-main()] Start of entry (in bytes): %d\n", i);
-			(*temp).status = getDirectoryEntryStatus(address,i);
-			(*temp).starting_block = getDirectoryEntryStartingBlock(address,i);
-			(*temp).block_count = getDirectoryEntryNumBlocks(address,i);
-			(*temp).size = getDirectoryEntryFileSize(address,i);
-			//Here we populate a temporary timedate struct...
-			populateDirectoryEntry_timedateStructure_create(address,i,ttemp);
-			populateDirectoryEntry_timedateStructure_mod(address,i,tttemp);
-			//And assign the temporary dir entry struct create_time attribute
-			//to the temporary timedate object.
-			//RECALL we're just writing over the same memory
-			//space, so if you need MULTIPLE copies of this, we'll
-			//have to malloc up more objects and store them
-			(*temp).create_time = (*ttemp);
-			(*temp).modify_time = (*tttemp);
-			//Memset filename to nulls first
-			//Same issue as above though, to expand this we might
-			//need to malloc up more structs and init all of their
-			//filename array attributes to null chars.
-			memset( (*temp).filename, '\0', 31 );
-			populateFilename(address,i,temp);
-			if( DEBUG ) printf("Temp struct status: 0x%02x\n", (*temp).status);
-			if( DEBUG ) printf("Temp struct starting_block: 0x%08x\n", (*temp).starting_block);
-			if( DEBUG ) printf("Temp struct num_blocks: 0x%08x\n", (*temp).block_count);
-			if( DEBUG ) printf("Temp struct file_size (hex): 0x%08x\n", (*temp).size);
-			if( DEBUG ) printf("Temp struct file_size (bytes): %d\n", (*temp).size);
-			if( DEBUG )	printf("Create year: 0x%04x\n", (*temp).create_time.year);
-			if( DEBUG ) printf("Create month: 0x%04x\n", (*temp).create_time.month);
-			if( DEBUG ) printf("Create day: 0x%04x\n", (*temp).create_time.day);
-			if( DEBUG ) printf("Create hour: 0x%04x\n", (*temp).create_time.hour);
-			if( DEBUG ) printf("Create minute: 0x%04x\n", (*temp).create_time.minute);
-			if( DEBUG ) printf("Create second: 0x%04x\n", (*temp).create_time.second);
-			if( DEBUG ) printf("Mod year: 0x%04x\n", (*temp).modify_time.year);
-			if( DEBUG )	printf("Mod month: 0x%04x\n", (*temp).modify_time.month);
-			if( DEBUG )	printf("Mod day: 0x%04x\n", (*temp).modify_time.day);
-			if( DEBUG )	printf("Mod hour: 0x%04x\n", (*temp).modify_time.hour);
-			if( DEBUG )	printf("Mod minute: 0x%04x\n", (*temp).modify_time.minute);
-			if( DEBUG )	printf("Mod second: 0x%04x\n", (*temp).modify_time.second);
-			if( DEBUG )	printf("Temp struct filename: %s\n", (*temp).filename );
-			
+		for( i = currentDirLow; i < currentDirHigh; i+=0x40 ) {
+			//TODO //TODO
+			dir_entry = (address+i);
+			dir_entry_timedate_mod = (address+i+0x00000014);
+			dir_entry->modify_time = (*dir_entry_timedate_mod);
+			dir_entry_timedate_create = (address+i+0x0000000D);
+			dir_entry->create_time = (*dir_entry_timedate_create);
+
+			//printf("Diskget struct status: 0x%"PRIx8"\n", dir_entry->status);
+			//printf("Diskget struct starting_block: 0x%"PRIx32"\n", htonl(dir_entry->starting_block) );
+			//printf("Diskget struct num_blocks: 0x%"PRIx32"\n", htonl(dir_entry->block_count) );
+			//printf("Diskget struct file_size (hex): 0x%"PRIx32"\n", htonl(dir_entry->size) );
+			//printf("Diskget struct file_size (bytes): %d\n", (int)( htonl(dir_entry->size) ) );
+			//printf("Diskget struct filename: %s\n", (char*)dir_entry->filename );
+			struct dir_entry_timedate_t temp = dir_entry->modify_time;
+			//struct dir_entry_timedate_t ttemp = dir_entry->create_time;
+			//(*dir_entry_timedate_create) = dir_entry->create_time;
+			//printf("Diskget struct mod_time: %d\n", (int)htons((temp.year)));
+			//printf("Diskget struct create_time: %d\n", (int)htons((ttemp.year)));
+
+
 			//TODO Implement ability to specify a directory listing
-			//Clearly will need to add a new ARGUMENT check for disklist(argv)
-			//But also, need to have a reference to all available directories
-			//This might involve a tree structure of some kind
-			//Consider a directory with UP TO 128 directory entries
-			//Note that the ROOT directory has 8 blocks.
-			//Every block has 512 bytes, 64 bytes per entry is 8 entries per block
-			//So the ROOT directory can have up to 64 entries (8block*8entries=64)
-			//However, we can add directories with arbitrarily more
-			//blocks.
-
-			//IDEA: When someone calls disklist /sub_dir, note the name of the sub_dir
-			//Conduct the disklist checks and populate all the necessary info, but more than that
-			//We'll have to POSSIBLY conduct a recursive directory creation
-			//There might be an easier way though: If we know a MAX NUMBER OF ENTRIES (N) per directory
-			//then each "directory" block at a specific address, can reference at most (N) number of
-			//other directories, or (N) number of files. So each directory can be represented by an array
-			//of struct pointers, pointing to directory entries (per inode scheme).
-			if( (*temp).status == 0x3 ) {
-				printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
-				(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
-				(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
+			
+			if( dir_entry->status == 0x3 ) {
+				//printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
+				//(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
+				//(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
+				printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (int)( htonl(dir_entry->size) ), (char*)dir_entry->filename, 
+				(int)htons((temp.year)),(int)(temp.month), (int)(temp.day),
+				(int)(temp.hour), (int)(temp.minute), (int)(temp.second));
 			}
 		}
 
-		free( temp );
-		free( ttemp);
-		free( tttemp );
+		//free( temp );
+		//free( ttemp);
+		//free( tttemp );
 		close(fp);
 	}
 	else {
 		printf("Error, too many arguments! Try: ./disklist test.img /sub_dir\n");
 	}
 }
-*/
 
 //DIRECTORY ENTRY COPY FILENAME
 void populateFilename( void* address, int offset, struct dir_entry_t* temp ) {
@@ -641,7 +604,6 @@ void diskinfo( int argc, char* argv[] ) {
     printf("Root directory blocks: %"PRIu32"\n", htonl(superblock->root_dir_block_count) );
     printf("\nFAT Information:\n");
     getFreeBlocks(address);
-
     printf("Free Blocks: %d\n", free_blocks);
     printf("Reserved Blocks: %d\n", res_blocks);
     printf("Allocated Blocks: %d\n", alloc_blocks);
@@ -652,15 +614,14 @@ void diskinfo( int argc, char* argv[] ) {
 
 void getFreeBlocks( void* address ) {
 
-    uint64_t first_FAT_block = (uint64_t)( htons(superblock->block_size)*htonl(superblock->fat_start_block) );
 	uint64_t i = 0x0000000000000000;
 	uint32_t entry_len = 0x00000004;
     uint32_t current_entry = 0x00000000;
-    if( DEBUG ) printf("SIZEOF int%zu\n", sizeof(int) );
-    if( DEBUG ) printf("First FAT block: %ld\n", first_FAT_block);
+    //if( DEBUG ) printf("SIZEOF int%zu\n", sizeof(int) );
+    //if( DEBUG ) printf("First FAT block: %ld\n", first_FAT_block);
 
-    uint64_t range_low = first_FAT_block;
-    uint64_t range_high = (uint64_t)( htons(superblock->block_size)*htonl(superblock->fat_block_count)+first_FAT_block );
+    uint64_t range_low = (uint64_t)( htons(superblock->block_size)*htonl(superblock->fat_start_block) );
+    uint64_t range_high = (uint64_t)( htons(superblock->block_size)*htonl(superblock->fat_block_count)+range_low );
 
 	if( DEBUG ) printf("range_low %"PRIx64" range_high %"PRIx64"\n", range_low, range_high);
 
