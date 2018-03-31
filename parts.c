@@ -1,59 +1,7 @@
 /*
---A directory entry size has nothing to do with the contents, its the numblocks of dir * blocksize
-
-
---Re packed structures: Just need to create the struct, the point the structure
-to the correct location in the memory mapping ie;
- struct superblock_t* sb;
- sb = struct superblock_t* sb;
- printf( %x\n), ntohl(sb->file_system_block_count);
-
- //What happens if we dont have the padding?
- ie struct{ char, int } 8 bytes
-	//We get 3 bytes of padding here (between char & int)
-
- 	struct{ char, long} 16 bytes
-	//We get 7 bytes of padding here (between char & long)
-
-	if the correct val in superblock for blockcount is 0x1900
-	without pack we end up with 0x19000000
-
-	
 --MAP SHARED (in mmap)
 If we modify something, copy_on_write, if we modify it the original data
 remains the same (handy if we're modifying the test image).
-
-
---in FAT ffff ffff is end of file, but also that block has data.
-
-*/
-
-// Block size: 512  <- offset 8
-// Block count: 5120 <-- offset 12 
-// FAT starts: 1 <-- offset 16
-// FAT blocks: 40 <-- offset 20
-// Root directory start: 41 <-- offset 24
-// Root directory blocks: 8 <-- offset 28
-
-// FAT information:
-// Free Blocks: 5071
-// Reserved Blocks: 41
-// Allocated Blocks: 8
-
-/*
-Block Size: 512
-Block Count: 6400
-FAT starts: 2
-FAT blocks: 50
-Root directory start: 53
-Root directory blocks: 8
-*/
-
-/*
-FAT information:
-Free Blocks: 5071
-Reserved Blocks: 41
-Allocated Blocks: 8
 */
 
 #include <stdio.h>
@@ -66,8 +14,8 @@ Allocated Blocks: 8
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <byteswap.h>
-const int i = 1;
-#define is_bigendian() ( (*(char*)&i) == 0 )
+const int xx = 1;
+#define is_bigendian() ( (*(char*)&xx) == 0 )
 #define DEBUG 0
 
 //Superblock struct
@@ -101,20 +49,14 @@ struct __attribute__((__packed__)) dir_entry_t {
 	uint8_t unused[6];
 };
 
+//Prototypes DISKPUT
+void diskput( int argc, char* argv[] );
 
 //Prototypes DISKGET
 void diskget( int argc, char* argv[] );
 
 //Prototypes DISKLIST
 void disklist( int argc, char* argv[] );
-uint8_t getDirectoryEntryStatus( void* address, int offset );
-uint32_t getDirectoryEntryStartingBlock( void* address, int offset );
-uint32_t getDirectoryEntryNumBlocks( void* address, int offset );
-uint32_t getDirectoryEntryFileSize( void* address, int offset );
-//void populateDirectoryEntry_dateTimeStructure( void*, int, dir_entry_timedate_t* );
-void populateDirectoryEntry_timedateStructure_create( void* address, int offset, struct dir_entry_timedate_t* ttemp );
-void populateDirectoryEntry_timedateStructure_mod( void* address, int offset, struct dir_entry_timedate_t* ttemp );
-void populateFilename( void* address, int offset, struct dir_entry_t* temp );
 
 //Prototypes DISKINFO
 void diskinfo( int argc, char* argv[] );
@@ -130,7 +72,6 @@ int eof_blocks=0;
 //For disklist IF a linked file list is made
 int dir_list_count=0;
 
-
 struct superblock_t* superblock;
 struct dir_entry_t*	dir_entry;
 struct dir_entry_timedate_t* dir_entry_timedate_mod;
@@ -143,10 +84,26 @@ int main( int argc, char* argv[] ) {
 		disklist(argc,argv);
 	#elif defined(PART3)
 		diskget(argc,argv);
+	#elif defined(PART4)
+		diskput(argc,argv);
     #else
         #error "Part[1234] must be defined"
     #endif
     return 0;
+}
+
+void diskput( int argc, char* argv[] ) {
+	printf("Puttin on the disk!\n");
+
+	//Based on the command line read the specific file into a byte array
+
+	//Calculate how many blocks are required for the file-to-copy
+
+		//file-to-copy.size/512 = num_blocks
+
+	//Find num_blocks number of 512 byte contiguous memory locations
+
+		//
 }
 
 //************* DISK GET ****************
@@ -183,7 +140,7 @@ void diskget( int argc, char* argv[] ) {
 			else {
 				path = (char**) realloc( path,pathcount );
 			}	
-			printf("Token: %s\n", token);
+			//printf("Token: %s\n", token);
 			path[pathcount] = (char*)malloc( strlen(token)+1 );
 			//path[pathcount] = '\0';
 			//printf("Reallocating, pathcount: %d\n", pathcount);
@@ -231,8 +188,8 @@ void diskget( int argc, char* argv[] ) {
 
 			/*CREATE FILE INFO STRUCTS FOR COMPARISONS AND "NEXT" INFO*/
 			for( i = currentDirLow; i < currentDirHigh; i+=0x00000040 ) {
-				printf("Trying to find %s...\n", path[path_index]);
-				printf("In block; iterating from %"PRIx64". Low is %"PRIx64". High is %"PRIx64"\n", i, currentDirLow, currentDirHigh);
+				//printf("Trying to find %s...\n", path[path_index]);
+				//printf("In block; iterating from %"PRIx64". Low is %"PRIx64". High is %"PRIx64"\n", i, currentDirLow, currentDirHigh);
 				if( DEBUG ) printf("[Diskget-main()] Start of entry (in hex): %"PRIx64"\n", i);
 
 				//Assign dir entry struct to the address with offset i
@@ -250,7 +207,7 @@ void diskget( int argc, char* argv[] ) {
 
 				//Otherwise Found Directory (if status is 0x5 and path token matches)
 				else if( dir_entry->status == (uint8_t)0x5 && !strcmp( path[path_index], (char*)dir_entry->filename ) ) {
-					printf("Found subdir, going to next subdir...\n");
+					//printf("Found subdir, going to next subdir...\n");
 					/*UPDATE THE BYTE RANGE HERE, CRITICAL
 					Can be done from the file (now dir) struct information*/
 					//only increment path index if subdir actually found
@@ -261,7 +218,7 @@ void diskget( int argc, char* argv[] ) {
 				//Or we got to the end of the block and nothing found
 				//TODO ensure the last file in directory block is REALLY being read
 				else if( i == currentDirHigh-0x00000040 ){
-					printf("Nothing found\n");
+					//printf("Nothing found\n");
 					path_index = pathcount;//just to exit while loop					
 					break;
 				}
@@ -269,22 +226,22 @@ void diskget( int argc, char* argv[] ) {
 		}
 		
 		if( file_found ) {
-			printf("FILE FOUND (see info below)\n");
-			printf("Diskget struct status: 0x%"PRIx8"\n", dir_entry->status);
-			printf("Diskget struct starting_block: 0x%"PRIx32"\n", htonl(dir_entry->starting_block) );
-			printf("Diskget struct num_blocks: 0x%"PRIx32"\n", htonl(dir_entry->block_count) );
-			printf("Diskget struct file_size (hex): 0x%"PRIx32"\n", htonl(dir_entry->size) );
-			printf("Diskget struct file_size (bytes): %d\n", (int)( htonl(dir_entry->size) ) );
-			printf("Diskget struct filename: %s\n", (char*)dir_entry->filename );
-			struct dir_entry_timedate_t temp = dir_entry->modify_time;
-			struct dir_entry_timedate_t ttemp = dir_entry->create_time;
+			//printf("FILE FOUND (see info below)\n");
+			//printf("Diskget struct status: 0x%"PRIx8"\n", dir_entry->status);
+			//printf("Diskget struct starting_block: 0x%"PRIx32"\n", htonl(dir_entry->starting_block) );
+			//printf("Diskget struct num_blocks: 0x%"PRIx32"\n", htonl(dir_entry->block_count) );
+			//printf("Diskget struct file_size (hex): 0x%"PRIx32"\n", htonl(dir_entry->size) );
+			//printf("Diskget struct file_size (bytes): %d\n", (int)( htonl(dir_entry->size) ) );
+			//printf("Diskget struct filename: %s\n", (char*)dir_entry->filename );
+			//struct dir_entry_timedate_t temp = dir_entry->modify_time;
+			//struct dir_entry_timedate_t ttemp = dir_entry->create_time;
 			//(*dir_entry_timedate_create) = dir_entry->create_time;
-			printf("Diskget struct mod_time: %d\n", (int)htons((temp.year)));
-			printf("Diskget struct create_time: %d\n", (int)htons((ttemp.year)));
+			//printf("Diskget struct mod_time: %d\n", (int)htons((temp.year)));
+			//printf("Diskget struct create_time: %d\n", (int)htons((ttemp.year)));
 
 		}
 		else {
-			printf("File not found\n");
+			printf("File not found.\n");
 			exit(1);
 		}
 		
@@ -297,19 +254,20 @@ void diskget( int argc, char* argv[] ) {
 
 		//also create an buffer array of 1 byte long hex-values; ie FF
 		//The data type might be uint8_t file_hex_bytes[file_byte_size]
-		uint8_t file_bytes[ dir_entry->size ];
-		
+		uint8_t file_bytes[ (int)(htonl(dir_entry->size)) ];
+
+		//printf("Got here\n");
 		//Look in FAT for file starting block X, which contains Y, go to Y, get Y-next etc
 			//For each link (starting block, Y, Y-next etc) add the value to file_blocks[ 0...num_blocks-1 ]
 		uint32_t cur = htonl(dir_entry->starting_block);
 		uint8_t k;
 		for( k = 0x00; k < htonl(dir_entry->block_count); k+= 0x01 ) {
-			printf("Looking at: %"PRIx64"\n", (uint64_t)(htonl(superblock->fat_start_block)*(htons(superblock->block_size)) + (cur*0x4)) );
-			printf("On file block: %d", (int)k);
+			//printf("Looking at: %"PRIx64"\n", (uint64_t)(htonl(superblock->fat_start_block)*(htons(superblock->block_size)) + (cur*0x4)) );
+			//printf("On file block: %d", (int)k);
 			file_blocks[k] = cur;
 			memcpy( &cur, address+(uint64_t)(htonl(superblock->fat_start_block)*(htons(superblock->block_size)) + (cur*0x4)), 4 ); 
 			cur = htonl(cur);
-			printf(", block is %"PRIx32", cur->next is %"PRIx32"\n", file_blocks[k], cur);
+			//printf(", block is %"PRIx32", cur->next is %"PRIx32"\n", file_blocks[k], cur);
 		}
 		
 		//Now that we have all the block references, we copy byte-by-byte to an array of size dir_entry->filesize
@@ -322,8 +280,8 @@ void diskget( int argc, char* argv[] ) {
 		//For each refrence in file_blocks
 		for( m = 0x00000000; m < htonl(dir_entry->block_count); m+=0x01 ) { //go to first file block
 			//Set the block_range_low = file_blocks[n]*blockSize
-			printf("M: %d, %"PRIx32"\n", (int)m, m );
-			printf("On block %d Looking at: %"PRIx64"\n", m, (uint64_t)(file_blocks[m]*htons(superblock->block_size)));
+			//printf("M: %d, %"PRIx32"\n", (int)m, m );
+			//printf("On block %d Looking at: %"PRIx64"\n", m, (uint64_t)(file_blocks[m]*htons(superblock->block_size)));
 			block_range_low = (uint64_t)(file_blocks[m]*htons(superblock->block_size));
 			//Set the block_range_high = block_range_low + blockSize
 			block_range_high = (uint64_t)( block_range_low + htons(superblock->block_size) );
@@ -331,8 +289,11 @@ void diskget( int argc, char* argv[] ) {
 			for( b = block_range_low; b < block_range_high; b+=0x01 ) {
 				//Copy hex-byte-pair to file_hex_bytes (previously defined as large as file size)
 				
-				if( bytecount <= htonl(dir_entry->size)) {
+				if( bytecount < htonl(dir_entry->size)) {
 					memcpy( &file_bytes[bytecount], address+b, 1 );
+					//if( file_bytes[bytecount] == htonl(dir_entry->size) ) {
+					//	printf("REACHED EOF!... %"PRIx8"\n", file_bytes[bytecount]);
+					//}
 					bytecount++;
 
 				}
@@ -345,14 +306,24 @@ void diskget( int argc, char* argv[] ) {
 			
 		}
 
-		for( m = 0x0; m < bytecount; m++ ) {
-			printf("%c", file_bytes[m]);
-			if( m%50 ==0 ) printf("\n");
-		}	
+		//for( m = 0x0; m < bytecount; m++ ) {
+		//	printf("%"PRIx8"", file_bytes[m]);
+		//	if( ((int)m)%50 == 0 ) 
+		//	{
+		//		printf("%"PRIx8"", file_bytes[m]);
+		//		printf("\n");
+		//	}
+		//}	
 		//Open a file (with the same name as the located file) in current directory in linux
 		//Write the file_hex_bytes array, byte-by-byte, to the open file
 		//Finally, close the file.
-		
+		FILE* write;
+		write = fopen(argv[3], "wb");
+		int ggg = 0;
+		while( ggg < bytecount ) {
+			fwrite( &file_bytes[ggg], 1, sizeof(file_bytes[ggg]), write );
+			ggg++;
+		}
 		
 		int j;
 		for( j = 0; j < pathcount; j++) free( path[j] );
@@ -462,7 +433,7 @@ void disklist( int argc, char* argv[] ) {
 				//printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
 				//(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
 				//(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
-				printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (int)( htonl(dir_entry->size) ), (char*)dir_entry->filename, 
+				printf("F %10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (int)( htonl(dir_entry->size) ), (char*)dir_entry->filename, 
 				(int)htons((temp.year)),(int)(temp.month), (int)(temp.day),
 				(int)(temp.hour), (int)(temp.minute), (int)(temp.second));
 			}
@@ -478,109 +449,6 @@ void disklist( int argc, char* argv[] ) {
 	}
 }
 
-//DIRECTORY ENTRY COPY FILENAME
-void populateFilename( void* address, int offset, struct dir_entry_t* temp ) {
-	memcpy( &(temp->filename), address+offset+27, 30 );
-}
-
-//DIRECTORY ENTRY MODIFICATION TIME
-void populateDirectoryEntry_timedateStructure_mod( void* address, int offset, struct dir_entry_timedate_t* ttemp ) {
-	uint16_t year;
-	uint8_t month;
-	uint8_t day;
-	uint8_t hour;
-	uint8_t minute;
-	uint8_t second;
-	memcpy( &year, address+offset+20, 2 );
-	memcpy( &month, address+offset+22, 1 );
-	memcpy( &day, address+offset+23, 1 );
-	memcpy( &hour, address+offset+24, 1 );
-	memcpy( &minute, address+offset+25, 1 );
-	memcpy( &second, address+offset+26, 1 );
-	if( !is_bigendian() ) year = htons( year );
-	(*ttemp).year = year;
-	(*ttemp).month = month;
-	(*ttemp).day = day;
-	(*ttemp).hour = hour;
-	(*ttemp).minute = minute;
-	(*ttemp).second = second;
-}
-//DIRECTORY ENTRY CREATE TIME
-void populateDirectoryEntry_timedateStructure_create( void* address, int offset, struct dir_entry_timedate_t* ttemp ) {
-	uint16_t year;
-	uint8_t month;
-	uint8_t day;
-	uint8_t hour;
-	uint8_t minute;
-	uint8_t second;
-	memcpy( &year, address+offset+13, 2 );
-	memcpy( &month, address+offset+15, 1 );
-	memcpy( &day, address+offset+16, 1 );
-	memcpy( &hour, address+offset+17, 1 );
-	memcpy( &minute, address+offset+18, 1 );
-	memcpy( &second, address+offset+19, 1 );
-	if( !is_bigendian() ) year = htons( year );
-	(*ttemp).year = year;
-	(*ttemp).month = month;
-	(*ttemp).day = day;
-	(*ttemp).hour = hour;
-	(*ttemp).minute = minute;
-	(*ttemp).second = second;
-}
-
-//DIRECTORY ENTRY FILE SIZE (IN BYTES)
-uint32_t getDirectoryEntryFileSize( void* address, int offset ) {
-	uint32_t file_size;
-	memcpy( &file_size, address+offset+9, 4);
-	if( !is_bigendian() ) file_size = htonl( file_size );
-	return file_size;
-}
-
-//DIRECTORY ENTRY NUM BLOCKS
-uint32_t getDirectoryEntryNumBlocks( void* address, int offset ) {
-	uint32_t num_blocks;
-	//try 3 bytes in for starting block
-	memcpy( &num_blocks, address+offset+5, 4);
-	if( !is_bigendian() ) num_blocks = htonl( num_blocks );
-	return num_blocks;
-}
-
-//DIRECTORY ENTRY STARTING BLOCK
-uint32_t getDirectoryEntryStartingBlock( void* address, int offset ) {
-	uint32_t starting_block;
-	//try 3 bytes in for starting block
-	memcpy( &starting_block, address+offset+1, 4);
-	if( !is_bigendian() ) starting_block = htonl( starting_block );
-	return starting_block;
-}
-
-
-//Return exactly 8 bit integer (1 byte status)
-uint8_t getDirectoryEntryStatus( void* address, int offset ) {
-	//TODO create functions to retrieve specific data from directory entries
-	
-	//00000011 value of the status "bitmask" denoting a "file" status
-
-	//This is the bitmask applied to
-	//FILE or NOT FILE
-
-	//Only ONE of bit 1, or bit 2, can be on, not both.
-	//either 0101 or 0011
-	//        Dir    File
-	//       0111    0111
-	//and	 0101    0011 
-	//xor    0010    0100 <-- 2 or 4
-
-	uint8_t status_bits;
-	if( DEBUG ) printf("[getDirectoryStatus()] Reading from: %04x\n", offset);
-	memcpy( &status_bits, address+offset, 1 );
-	//if( !is_bigendian() ) status_bits = htons( status_bits );
-	//don't need to do htons etc. on single bytes.
-	if( DEBUG ) printf("Status found to be: 0x%02x\n", status_bits);
-	return status_bits;
-}
-
-
 //************* DISK INFO ****************
 void diskinfo( int argc, char* argv[] ) {
     int fp = open( argv[1], O_RDWR );
@@ -594,7 +462,10 @@ void diskinfo( int argc, char* argv[] ) {
                 exit(1);
     }
 	superblock = address;
-   
+//	int fb = 0;
+//	int rb = 0;
+//	int ab = 0;
+
     printf("Super block information:\n");
     printf("Block size: %"PRIu16"\n", htons(superblock->block_size));
     printf("Block count: %"PRIu32"\n", htonl(superblock->file_system_count) );
@@ -614,7 +485,7 @@ void diskinfo( int argc, char* argv[] ) {
 
 void getFreeBlocks( void* address ) {
 
-	uint64_t i = 0x0000000000000000;
+	uint64_t b = 0x0000000000000000;
 	uint32_t entry_len = 0x00000004;
     uint32_t current_entry = 0x00000000;
     //if( DEBUG ) printf("SIZEOF int%zu\n", sizeof(int) );
@@ -625,24 +496,24 @@ void getFreeBlocks( void* address ) {
 
 	if( DEBUG ) printf("range_low %"PRIx64" range_high %"PRIx64"\n", range_low, range_high);
 
-    for( i = range_low; i < range_high; i+=entry_len ) {
+    for( b = range_low; b < range_high; b+=entry_len ) {
 
-        memcpy( &current_entry, (address+i), entry_len );
+        memcpy( &current_entry, (address+b), entry_len );
         if( !is_bigendian() ) current_entry = htonl(current_entry);
-        if( current_entry == 0x00000000 ) {
-			free_blocks++;
+        if( current_entry == 0 ) {
+			free_blocks+=1;
 		}
-        else if ( current_entry == 0x00000001 ){
-			res_blocks++;
+        else if ( current_entry == 1 ){
+			res_blocks+=1;
         	if( DEBUG ) { 
-			printf("Reading %"PRIx64"", i);
+			printf("Reading %"PRIx64"", b);
 			printf("  Current entry %"PRIx32"\n", current_entry);
 			printf("res_blocks++\n");}
 		}
 		else {
-			alloc_blocks++;
+			alloc_blocks+=1;
 			if( DEBUG ) {
-			printf("Reading %"PRIx64"", i);
+			printf("Reading %"PRIx64"", b);
 			printf("  Current entry %"PRIx32"\n", current_entry);
 			printf("alloc_blocks++\n");}
 		}
