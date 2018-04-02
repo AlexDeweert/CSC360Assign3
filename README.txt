@@ -5,6 +5,14 @@ ID: V00855767
 
 This is an information file regarding the use of, expected outcome, and operation of the programs in this project.
 
+*****************************************WARNING*********************************************
+After extracting the project, Please run "make" to execute Makefile commands.
+Following that, the required assignment programs ./diskinfo, ./disklist, ./diskget, ./diskput
+should work as required in the assignment specifications.
+Also please note, that extensive input sanitizing hasn't been conducted, so the program
+assumes good input as specified below.
+*********************************************************************************************
+
 1) DISKINFO
 
 1.1) Use
