@@ -1,7 +1,10 @@
 /*
---MAP SHARED (in mmap)
-If we modify something, copy_on_write, if we modify it the original data
-remains the same (handy if we're modifying the test image).
+	Programming Assignment 3
+	CSC360 Winter 2018 Prof. J. PAN
+	Student: Alexander (Lee) DEWEERT
+	ID: V00855867
+
+	***See README.txt for more info***
 */
 
 #include <stdio.h>
@@ -64,7 +67,6 @@ void diskinfo( int argc, char* argv[] );
 void getFreeBlocks( void* );
 
 //Globals
-//These are FAT variables
 //These could be moved into non-globals
 int free_blocks=0;
 int res_blocks=0;
@@ -73,12 +75,14 @@ int eof_blocks=0;
 //For disklist IF a linked file list is made
 int dir_list_count=0;
 
+//Global struct instances
 struct superblock_t* superblock;
 struct superblock_t* sb;
 struct dir_entry_t*	dir_entry;
 struct dir_entry_timedate_t* dir_entry_timedate_mod;
 struct dir_entry_timedate_t* dir_entry_timedate_create;
 
+//Main
 int main( int argc, char* argv[] ) {
     #if defined(PART1)
         diskinfo(argc,argv);
@@ -94,9 +98,8 @@ int main( int argc, char* argv[] ) {
     return 0;
 }
 
+//Write a file onto a disk image
 void diskput( int argc, char* argv[] ) {
-	printf("Puttin on the disk!\n");
-
 	if( argc != 4 ) {
 		printf("Error!! Need 4 arguments. Try ./diskput test.img file.txt /renamed_file.txt\n");
 	}
@@ -118,10 +121,10 @@ void diskput( int argc, char* argv[] ) {
 		sb = img_file_address;
 
 		//Get linux filename
-		printf( "Reading in host file: %s\n", argv[2] );
+		if( DEBUG ) printf( "Reading in host file: %s\n", argv[2] );
 		
 		//Get args filename spec'd
-		printf( "Writing to image file: %s\n", argv[1] );
+		if( DEBUG ) printf( "Writing to image file: %s\n", argv[1] );
 
 		//Create host file file information
 		//Calculate how many blocks are required for the file-to-copy
@@ -129,8 +132,8 @@ void diskput( int argc, char* argv[] ) {
 		uint32_t starting_block = 0x99;
 		uint32_t block_count = ceil( (double)host_file_buffer.st_size/(double)htons(sb->block_size));
 		uint32_t size = host_file_buffer.st_size;
-		printf( "DirEntry Status: %d, Startblock %"PRIx8", Block_count: %d, Size(Bytes): %d\n",
-		status,starting_block,block_count,size );
+		if( DEBUG ) { printf( "DirEntry Status: %d, Startblock %"PRIx8", Block_count: %d, Size(Bytes): %d\n",
+		status,starting_block,block_count,size ); }
 		
 		//Find num_blocks number of 512 byte contiguous memory locations (locate in FAT)
 		uint64_t low, high, i;
@@ -138,7 +141,7 @@ void diskput( int argc, char* argv[] ) {
 		int k=0, all_free=0, fat_entry=0;
 		low = (uint64_t)(htonl(sb->fat_start_block)*htons(sb->block_size));
     	high = (uint64_t)( htons(sb->block_size)*htonl(sb->fat_block_count)+low );
-		printf( "fat low: %"PRIx64", fat high: %"PRIx64"\n", low, high);
+		if( DEBUG ) printf( "fat low: %"PRIx64", fat high: %"PRIx64"\n", low, high);
 		for( i = low; i < high; i+= (0x04) ) {
 			memcpy( &cur, img_file_address+i, 4 );
 			if( htonl( cur ) == 0 ) { block_pointers[k] = (uint32_t)fat_entry; k++; }
@@ -147,7 +150,7 @@ void diskput( int argc, char* argv[] ) {
 		}
 		if( !all_free ) { printf("Error: No free space.\n"); exit(1); }
 		for( i = 0x0; i < block_count; i++ ) {
-			printf("block_pointers[ 0x%"PRIx32":%"PRIu32" ] = 0x%"PRIx32":%"PRIu32"\n", 
+			if( DEBUG ) printf("block_pointers[ 0x%"PRIx32":%"PRIu32" ] = 0x%"PRIx32":%"PRIu32"\n", 
 			block_pointers[i],
 			block_pointers[i],
 			(uint32_t)(block_pointers[i]*(htons(sb->block_size))), 
@@ -173,9 +176,8 @@ void diskput( int argc, char* argv[] ) {
 		uint32_t de_bc = ntohl( block_count );
 		uint32_t de_size = ntohl( size );
 		uint8_t de_fn[31];
-		char* test_filenm = "aaaabbbbccccddddllllaaaauuuuju";
 		memset( de_fn, '\0', 31 );
-		memcpy( de_fn, &test_filenm, 30);
+		memcpy( de_fn, argv[3]+1, strlen(argv[3])-1 );
 		for( i = r_low; i < r_high; i+=0x40 ) {
 			memcpy( &cur_status, img_file_address+i, 1 );
 			if( cur_status == 0x0 ) {
@@ -189,26 +191,25 @@ void diskput( int argc, char* argv[] ) {
 		}
 
 		//For each block in the array[num_blocks], write 512 bytes of the file.mmap to image.mmap 
-	//Write the image.mmap out to disk.img
+		//Write the image.mmap out to disk.img
+		for( k=0; k < block_count; k++ ) {
+			memcpy( img_file_address+(block_pointers[k]*htons(sb->block_size)), host_file_address+(k*htons(sb->block_size)), htons(sb->block_size) );
+		}
 
 		//Unmap the mmaps
 		munmap( host_file_address, host_file_buffer.st_size );
 		munmap( img_file_address, img_buffer.st_size );
 	}
-
 }
 
-//************* DISK GET ****************
+//Get a file from the disk image
 void diskget( int argc, char* argv[] ) {
 	uint64_t i = 0x0000000000000000;	
 	if( argc < 4 ) {
 		printf("Error, not enough arguments!! Try ./disklist test.img /img_dir/file.txt renamed_file.txt\n");
 		exit(1);
 	}
-	else if( argc == 4 ){ //program name, disk.img, subdir/filename, renamed_filename
-	
-		
-
+	else if( argc == 4 ){
 		/*MAP THE IMAGE FILE*/
 		//First map the image file
 		//mmap the disk.img to memory, get with "address" pointer
@@ -219,6 +220,7 @@ void diskget( int argc, char* argv[] ) {
 		if (address == MAP_FAILED) { perror("Map source error\n"); exit(1); }
 		superblock = address;
 		
+		//Unused path parsing
 		/*PARSE IN THE PATH*/
 		//Parse argv[2] into an array of subdir names, or filenames, path[parse_count]
 		char** path;
@@ -317,23 +319,9 @@ void diskget( int argc, char* argv[] ) {
 			}
 		}
 		
-		if( file_found ) {
-			//printf("FILE FOUND (see info below)\n");
-			//printf("Diskget struct status: 0x%"PRIx8"\n", dir_entry->status);
-			//printf("Diskget struct starting_block: 0x%"PRIx32"\n", htonl(dir_entry->starting_block) );
-			//printf("Diskget struct num_blocks: 0x%"PRIx32"\n", htonl(dir_entry->block_count) );
-			//printf("Diskget struct file_size (hex): 0x%"PRIx32"\n", htonl(dir_entry->size) );
-			//printf("Diskget struct file_size (bytes): %d\n", (int)( htonl(dir_entry->size) ) );
-			//printf("Diskget struct filename: %s\n", (char*)dir_entry->filename );
-			//struct dir_entry_timedate_t temp = dir_entry->modify_time;
-			//struct dir_entry_timedate_t ttemp = dir_entry->create_time;
-			//(*dir_entry_timedate_create) = dir_entry->create_time;
-			//printf("Diskget struct mod_time: %d\n", (int)htons((temp.year)));
-			//printf("Diskget struct create_time: %d\n", (int)htons((ttemp.year)));
-
-		}
-		else {
+		if( !file_found ) {
 			printf("File not found.\n");
+			munmap(address, buffer.st_size);
 			exit(1);
 		}
 		
@@ -398,14 +386,6 @@ void diskget( int argc, char* argv[] ) {
 			
 		}
 
-		//for( m = 0x0; m < bytecount; m++ ) {
-		//	printf("%"PRIx8"", file_bytes[m]);
-		//	if( ((int)m)%50 == 0 ) 
-		//	{
-		//		printf("%"PRIx8"", file_bytes[m]);
-		//		printf("\n");
-		//	}
-		//}	
 		//Open a file (with the same name as the located file) in current directory in linux
 		//Write the file_hex_bytes array, byte-by-byte, to the open file
 		//Finally, close the file.
@@ -425,15 +405,10 @@ void diskget( int argc, char* argv[] ) {
 		printf("Error, too many arguments!! Try ./disklist test.img /img_dir/file.txt renamed_file.txt\n");
 		exit(1); 
 	}
-		
 }
 
-//************* DISK LIST ****************
-
-
+//List all file in root directory
 void disklist( int argc, char* argv[] ) {
-
-
 	if( argc < 3 ) {
 		printf("Error, not enough arguments!! Try ./disklist test.img /directory\n");
 		exit(1);
@@ -463,24 +438,7 @@ void disklist( int argc, char* argv[] ) {
 			currentDirLow = (uint64_t)( htonl(superblock->root_dir_start_block)*htons(superblock->block_size) );
 			currentDirHigh = (uint64_t)( currentDirLow + htonl(superblock->root_dir_block_count)*htons(superblock->block_size) );
 		}
-		//Otherwise the subdirectory was specified by name
-		//If that's the case then we have to search for the starting block
-		//of the subdirectory in question.
-		// 1) Get subdirectory name (from arg)
-		//		   1.1) Note that if arg3 is /subdir1/subdir2/... we only need to check root for subdir1 and go there
-		//				if it's actually present. Otherwise we gracefully exit. Similarly for subdir2...subdirN
-		//
-		// 2) Search through all entries in the root (or current) directory for current parsed arg (ie /subdir1/subdir2/...)
-		//	  Side note here, we can't know ahead of time if the subdir actually exists in the Filesystem.
-		//    This can be solved efficiently (in execution) with a nice graph and search algo
-		//	  For the sake of time (actually getting this done) maybe we can just do a brute force
-		//	  search every time instead of something elegant. Ie; scan root (if found go to subdir) repeat
-		//	  until the very last subdirectory is linearly scanned, if no match return error and exit.
-		//		2.1) If the subdirectory name is a match, also ensure it's actually a dir, not a file
-		//			2.1.1) If it's a file, error and exit
-		//			2.1.2) If it's a DIR then set "dirLow = getSubdirectoryStarts(address)*getBlocksize(address)"
-		//				   and iterate as you would in the root directory
-
+		
 		//TODO implement subdirectory search. We might need a loop which calculates
 		//the current directory block for the next subdirectory name, then updates
 		//the currentDirHigh and currentDirLow values when found (do after part3 and 4 if time)
@@ -491,57 +449,37 @@ void disklist( int argc, char* argv[] ) {
 
 		//HERE WE ACTUALLY LIST THE DIRECTORY CONTENTS
 		//(prior to this we're just searching for the correct location to list)
-
-		//struct dir_entry_t* temp = malloc( sizeof(struct dir_entry_t) );
-		//Create_time
-		//struct dir_entry_timedate_t* ttemp = malloc( sizeof(struct dir_entry_timedate_t) );
-		//Mod_time
-		//struct dir_entry_timedate_t* tttemp = malloc( sizeof(struct dir_entry_timedate_t) );
-
 		for( i = currentDirLow; i < currentDirHigh; i+=0x40 ) {
-			//TODO //TODO
 			dir_entry = (address+i);
 			dir_entry_timedate_mod = (address+i+0x00000014);
 			dir_entry->modify_time = (*dir_entry_timedate_mod);
 			dir_entry_timedate_create = (address+i+0x0000000D);
 			dir_entry->create_time = (*dir_entry_timedate_create);
 
-			//printf("Diskget struct status: 0x%"PRIx8"\n", dir_entry->status);
-			//printf("Diskget struct starting_block: 0x%"PRIx32"\n", htonl(dir_entry->starting_block) );
-			//printf("Diskget struct num_blocks: 0x%"PRIx32"\n", htonl(dir_entry->block_count) );
-			//printf("Diskget struct file_size (hex): 0x%"PRIx32"\n", htonl(dir_entry->size) );
-			//printf("Diskget struct file_size (bytes): %d\n", (int)( htonl(dir_entry->size) ) );
-			//printf("Diskget struct filename: %s\n", (char*)dir_entry->filename );
 			struct dir_entry_timedate_t temp = dir_entry->modify_time;
-			//struct dir_entry_timedate_t ttemp = dir_entry->create_time;
-			//(*dir_entry_timedate_create) = dir_entry->create_time;
-			//printf("Diskget struct mod_time: %d\n", (int)htons((temp.year)));
-			//printf("Diskget struct create_time: %d\n", (int)htons((ttemp.year)));
-
 
 			//TODO Implement ability to specify a directory listing
-			
 			if( dir_entry->status == 0x3 ) {
-				//printf("F%10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (*temp).size, (*temp).filename, 
-				//(*temp).modify_time.year,(*temp).modify_time.month, (*temp).modify_time.day,
-				//(*temp).modify_time.hour, (*temp).modify_time.minute, (*temp).modify_time.second );
-				printf("F %10d %30s %d/%02d/%02d %02d:%02d:%02d\n", (int)( htonl(dir_entry->size) ), (char*)dir_entry->filename, 
-				(int)htons((temp.year)),(int)(temp.month), (int)(temp.day),
-				(int)(temp.hour), (int)(temp.minute), (int)(temp.second));
+				printf("F %10d %30s %d/%02d/%02d %02d:%02d:%02d\n", 
+				(int)( htonl(dir_entry->size) ), 
+				(char*)dir_entry->filename, 
+				(int)htons((temp.year)),
+				(int)(temp.month), 
+				(int)(temp.day),
+				(int)(temp.hour), 
+				(int)(temp.minute), 
+				(int)(temp.second));
 			}
 		}
-
-		//free( temp );
-		//free( ttemp);
-		//free( tttemp );
 		close(fp);
+		munmap(address, buffer.st_size);
 	}
 	else {
 		printf("Error, too many arguments! Try: ./disklist test.img /sub_dir\n");
 	}
 }
 
-//************* DISK INFO ****************
+//Get disk image information
 void diskinfo( int argc, char* argv[] ) {
     int fp = open( argv[1], O_RDWR );
     struct stat buffer;
@@ -554,10 +492,6 @@ void diskinfo( int argc, char* argv[] ) {
                 exit(1);
     }
 	superblock = address;
-//	int fb = 0;
-//	int rb = 0;
-//	int ab = 0;
-
     printf("Super block information:\n");
     printf("Block size: %"PRIu16"\n", htons(superblock->block_size));
     printf("Block count: %"PRIu32"\n", htonl(superblock->file_system_count) );
@@ -573,6 +507,7 @@ void diskinfo( int argc, char* argv[] ) {
     if( DEBUG) printf("EOF Blocks: %d\n", eof_blocks);
 
     close(fp);
+	munmap(address, buffer.st_size );
 }
 
 void getFreeBlocks( void* address ) {
