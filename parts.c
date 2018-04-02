@@ -14,6 +14,7 @@ remains the same (handy if we're modifying the test image).
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <byteswap.h>
+#include <math.h>
 const int xx = 1;
 #define is_bigendian() ( (*(char*)&xx) == 0 )
 #define DEBUG 0
@@ -73,6 +74,7 @@ int eof_blocks=0;
 int dir_list_count=0;
 
 struct superblock_t* superblock;
+struct superblock_t* sb;
 struct dir_entry_t*	dir_entry;
 struct dir_entry_timedate_t* dir_entry_timedate_mod;
 struct dir_entry_timedate_t* dir_entry_timedate_create;
@@ -95,15 +97,81 @@ int main( int argc, char* argv[] ) {
 void diskput( int argc, char* argv[] ) {
 	printf("Puttin on the disk!\n");
 
-	//Based on the command line read the specific file into a byte array
+	if( argc != 4 ) {
+		printf("Error!! Need 4 arguments. Try ./diskput test.img file.txt /renamed_file.txt\n");
+	}
+	else {
+	
+		//Based on the command line read the specific file into a memory map.
+		int host_file_fp = open( argv[2], O_RDONLY );
+		int img_fp = open( argv[1], O_RDWR );
+		struct stat host_file_buffer;
+		struct stat img_buffer;
+		fstat(host_file_fp, &host_file_buffer);
+		fstat(img_fp, &img_buffer);
+		void* host_file_address = mmap(NULL, host_file_buffer.st_size, PROT_READ, MAP_SHARED, host_file_fp, 0);
+		void* img_file_address = mmap(NULL, img_buffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, img_fp, 0);
+		if (host_file_address == MAP_FAILED) { perror("Host file map source error\n"); exit(1); }
+		if (img_file_address == MAP_FAILED) { perror("Image file map source error\n"); exit(1); }
 
-	//Calculate how many blocks are required for the file-to-copy
+		//Map disk image file to mem
+		sb = img_file_address;
 
-		//file-to-copy.size/512 = num_blocks
+		//Get linux filename
+		printf( "Reading in host file: %s\n", argv[2] );
+		
+		//Get args filename spec'd
+		printf( "Writing to image file: %s\n", argv[1] );
 
-	//Find num_blocks number of 512 byte contiguous memory locations
+		//Create host file file information
+		//Calculate how many blocks are required for the file-to-copy
+		uint8_t status = 0x3;
+		uint32_t starting_block = 0x99;
+		uint32_t block_count = ceil( (double)host_file_buffer.st_size/(double)htons(sb->block_size));
+		uint32_t size = host_file_buffer.st_size;
+		printf( "DirEntry Status: %d, Startblock %"PRIx8", Block_count: %d, Size(Bytes): %d\n",
+		status,starting_block,block_count,size );
 
-		//
+		//Find num_blocks number of 512 byte contiguous memory locations (locate in FAT)
+		uint64_t low, high, i;
+		uint32_t cur, j, block_pointers[block_count];
+		int k=0, all_free=1;
+		low = (uint64_t)(htonl(sb->fat_start_block)*htons(sb->block_size));
+    	high = (uint64_t)( htons(sb->block_size)*htonl(sb->fat_block_count)+low );
+		printf( "fat low: %"PRIx64", fat high: %"PRIx64"\n", low, high);
+		for( i = 0x0; i < high, i+= (0x04)*(block_count) ) {
+			for( j = i; j < (i+(0x04)*(block_count)); j+=0x04 ) {
+				memcpy( &block_pointers[ k ], address+j, 4 );
+				if( htons( &block_pointers[ k ] == 0x0 ) ) {
+					k++;
+					//TODO add a flag indicating whether a non-zero was encountered
+					//during the memcpy, if it was, set flag 0 and break.
+				}
+				else break;
+			}
+			//TODO if we get here, and all_free = 1 then break
+			//and we have our contiguous blocks
+		}
+
+		//If found, 
+			//return the array[num_blocks] which contain all of the next-pointers.
+			//Change the values at each FAT entry location to [ start, next, next ... ]
+
+		//Update the starting block for host file info
+		//starting_block = array[0];
+
+	//Write the values of the file struct into the root_dir entry (with the starting block etc)
+	//memcpy( dest, source, size of write );
+
+	//For each block in the array[num_blocks], write 512 bytes of the file.mmap to image.mmap 
+
+	//Write the image.mmap out to disk.img
+
+		//Unmap the mmaps
+		munmap( host_file_address, host_file_buffer.st_size );
+		munmap( img_file_address, img_buffer.st_size );
+	}
+
 }
 
 //************* DISK GET ****************
