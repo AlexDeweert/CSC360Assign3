@@ -131,40 +131,64 @@ void diskput( int argc, char* argv[] ) {
 		uint32_t size = host_file_buffer.st_size;
 		printf( "DirEntry Status: %d, Startblock %"PRIx8", Block_count: %d, Size(Bytes): %d\n",
 		status,starting_block,block_count,size );
-
+		
 		//Find num_blocks number of 512 byte contiguous memory locations (locate in FAT)
 		uint64_t low, high, i;
-		uint32_t cur, j, block_pointers[block_count];
-		int k=0, all_free=1;
+		uint32_t block_pointers[block_count], cur;
+		int k=0, all_free=0, fat_entry=0;
 		low = (uint64_t)(htonl(sb->fat_start_block)*htons(sb->block_size));
     	high = (uint64_t)( htons(sb->block_size)*htonl(sb->fat_block_count)+low );
 		printf( "fat low: %"PRIx64", fat high: %"PRIx64"\n", low, high);
-		for( i = 0x0; i < high, i+= (0x04)*(block_count) ) {
-			for( j = i; j < (i+(0x04)*(block_count)); j+=0x04 ) {
-				memcpy( &block_pointers[ k ], address+j, 4 );
-				if( htons( &block_pointers[ k ] == 0x0 ) ) {
-					k++;
-					//TODO add a flag indicating whether a non-zero was encountered
-					//during the memcpy, if it was, set flag 0 and break.
-				}
-				else break;
-			}
-			//TODO if we get here, and all_free = 1 then break
-			//and we have our contiguous blocks
+		for( i = low; i < high; i+= (0x04) ) {
+			memcpy( &cur, img_file_address+i, 4 );
+			if( htonl( cur ) == 0 ) { block_pointers[k] = (uint32_t)fat_entry; k++; }
+			if( k == block_count ) { all_free = 1; break; }
+			fat_entry++;
+		}
+		if( !all_free ) { printf("Error: No free space.\n"); exit(1); }
+		for( i = 0x0; i < block_count; i++ ) {
+			printf("block_pointers[ 0x%"PRIx32":%"PRIu32" ] = 0x%"PRIx32":%"PRIu32"\n", 
+			block_pointers[i],
+			block_pointers[i],
+			(uint32_t)(block_pointers[i]*(htons(sb->block_size))), 
+			(uint32_t)(block_pointers[i]*(htons(sb->block_size))));
+		}
+		
+		//If found, update starting_block for new file entry
+		//Change the values at each FAT entry location to [ start, next, next ... ]
+		starting_block = block_pointers[0];
+		uint32_t end = 0xFFFFFFFF;
+		uint32_t next;
+		for( k = 0; k < block_count; k++ ) {
+			next = ntohl(block_pointers[k+1]);
+			if( k != (block_count-1) ) memcpy( img_file_address+low+(block_pointers[k]*4), &next, 4 );
+			else memcpy( img_file_address+low+(block_pointers[k]*4), &end, 4 );
 		}
 
-		//If found, 
-			//return the array[num_blocks] which contain all of the next-pointers.
-			//Change the values at each FAT entry location to [ start, next, next ... ]
+		uint64_t r_low = (uint64_t)( htonl(sb->root_dir_start_block)*htons(sb->block_size) );
+		uint64_t r_high = (uint64_t)( r_low + htonl(sb->root_dir_block_count)*htons(sb->block_size) );
+		uint8_t cur_status=0x0;
+		uint8_t de_status = 0x3;
+		uint32_t de_bp = ntohl( block_pointers[0] );
+		uint32_t de_bc = ntohl( block_count );
+		uint32_t de_size = ntohl( size );
+		uint8_t de_fn[31];
+		char* test_filenm = "aaaabbbbccccddddllllaaaauuuuju";
+		memset( de_fn, '\0', 31 );
+		memcpy( de_fn, &test_filenm, 30);
+		for( i = r_low; i < r_high; i+=0x40 ) {
+			memcpy( &cur_status, img_file_address+i, 1 );
+			if( cur_status == 0x0 ) {
+				memcpy( img_file_address+i, &de_status, 1 );
+				memcpy( img_file_address+i+1, &de_bp, 4 );
+				memcpy( img_file_address+i+5, &de_bc, 4 );
+				memcpy( img_file_address+i+9, &de_size, 4 );
+				memcpy( img_file_address+i+27, de_fn, 30 );
+				break;
+			}
+		}
 
-		//Update the starting block for host file info
-		//starting_block = array[0];
-
-	//Write the values of the file struct into the root_dir entry (with the starting block etc)
-	//memcpy( dest, source, size of write );
-
-	//For each block in the array[num_blocks], write 512 bytes of the file.mmap to image.mmap 
-
+		//For each block in the array[num_blocks], write 512 bytes of the file.mmap to image.mmap 
 	//Write the image.mmap out to disk.img
 
 		//Unmap the mmaps
